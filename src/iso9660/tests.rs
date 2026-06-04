@@ -1,7 +1,7 @@
 use std::fs::File;
 
 use super::*;
-use crate::Encode;
+use crate::encoders::Encode;
 
 #[test]
 fn write_psx_system_area() {

@@ -1,3 +1,4 @@
+pub mod fs;
 #[cfg(test)]
 mod tests;
 pub mod vol_desc;
@@ -8,7 +9,7 @@ use std::marker::{Destruct, PhantomData};
 use arbitrary_int::prelude::*;
 use bitbybit::{bitfield, *};
 
-use crate::{Encode, EncodeCtx};
+use crate::encoders::{Encode, EncodeCtx, Fill};
 
 #[bitfield(u8, debug)]
 pub struct Bcd {
@@ -306,64 +307,6 @@ enum LicenseString {
     US,
 }
 
-struct Fill {
-    pattern:     &'static [u8],
-    total_bytes: usize,
-}
-
-impl Fill {
-    fn zero(bytes: usize) -> Self {
-        Self {
-            total_bytes: bytes,
-            pattern:     &[0],
-        }
-    }
-    fn new(bytes: usize, pat: &'static [u8]) -> Self {
-        Self {
-            pattern:     pat,
-            total_bytes: bytes,
-        }
-    }
-}
-
-impl Encode for Fill {
-    fn size(&self) -> usize {
-        self.total_bytes
-    }
-    fn encode<W: DiscWrite>(&self, writer: &mut W, _ctx: &EncodeCtx) -> io::Result<()> {
-        let mut written = 0;
-        while written < self.total_bytes {
-            let remaining = self.total_bytes - written;
-            let chunk = &self.pattern[..self.pattern.len().min(remaining)];
-            writer.write_all(chunk)?;
-            written += chunk.len();
-        }
-        Ok(())
-    }
-}
-
-pub struct FillConst<const VALUE: u8, const N: usize>;
-
-impl<const VALUE: u8, const N: usize> Encode for FillConst<VALUE, N> {
-    fn size(&self) -> usize {
-        N
-    }
-    fn encode<W: DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> io::Result<()> {
-        Fill::new(N, &[VALUE]).encode(writer, ctx)
-    }
-}
-
-pub struct ByteConst<const VALUE: u8>;
-
-impl<const VALUE: u8> Encode for ByteConst<VALUE> {
-    fn size(&self) -> usize {
-        1
-    }
-    fn encode<W: DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> io::Result<()> {
-        FillConst::<VALUE, 1>.encode(writer, ctx)
-    }
-}
-
 impl Encode for SyncHeader {
     fn encode<W: DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> io::Result<()> {
         let pattern = &[
@@ -424,37 +367,6 @@ impl Encode for Subheader {
     }
 }
 
-pub struct PaddedConst<T: Encode, const N: usize> {
-    data: T,
-}
-
-impl<T: Encode> PaddedConst<T, 0> {
-    pub fn new<const SIZE: usize>(data: T) -> PaddedConst<T, SIZE> {
-        PaddedConst { data }
-    }
-}
-
-impl<T: Encode, const N: usize> Encode for PaddedConst<T, N> {
-    fn size(&self) -> usize {
-        N
-    }
-    fn encode<W: DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> io::Result<()> {
-        let block_size = self.size();
-        assert!(
-            self.data.size() <= block_size,
-            "data ({}) is {} bytes, greater than data block size {}",
-            std::any::type_name::<T>(),
-            self.data.size(),
-            block_size
-        );
-        let padding = block_size.saturating_sub(self.data.size());
-        let fill = Fill::zero(padding);
-        self.data.encode(writer, ctx)?;
-        fill.encode(writer, ctx)?;
-        Ok(())
-    }
-}
-
 struct DataBlock<'a, T: Encode, F> {
     data: &'a T,
     _ty:  PhantomData<F>,
@@ -482,6 +394,7 @@ impl<T: Encode, F> DataBlock<'_, T, F> {
 }
 
 impl<'a, T: Encode> DataBlock<'a, T, Form1Sector<T>> {
+    #[must_use]
     fn new_form1(data: &'a T) -> Self {
         Self {
             data,
@@ -490,6 +403,7 @@ impl<'a, T: Encode> DataBlock<'a, T, Form1Sector<T>> {
     }
 }
 impl<'a, T: Encode> DataBlock<'a, T, Form2Sector<T>> {
+    #[must_use]
     fn new_form2(data: &'a T) -> Self {
         Self {
             data,
@@ -532,6 +446,7 @@ impl<T: Encode> Encode for Form1Sector<T> {
 }
 
 impl<T> Form1Sector<T> {
+    #[must_use]
     pub fn new(data: T, mss: Mss<Bcd>, submode: Submode) -> Self {
         Self {
             sync: SyncHeader,
@@ -553,6 +468,7 @@ impl<T> Form1Sector<T> {
 }
 
 impl<T> Form2Sector<T> {
+    #[must_use]
     pub fn new(data: T, mss: Mss<Bcd>, submode: Submode) -> Self {
         Self {
             sync: SyncHeader,
@@ -636,7 +552,7 @@ impl Encode for LicenseString {
                 }
                 static FILL: &[u8] = &core::array::from_fn::<u8, 64, _>(value);
 
-                Fill::new(1983, FILL);
+                Fill::new(1983, FILL).encode(writer, ctx)?;
             }
         }
         Ok(())

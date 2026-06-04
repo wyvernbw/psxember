@@ -3,8 +3,10 @@
 //! module for the primary volume descriptor (sector 16) and the descriptor set
 //! terminator (sector 17).
 
-use crate::Encode;
-use crate::iso9660::{ByteConst, FillConst, PaddedConst, Todo};
+use crate::encoders::{
+    BigEndian, ByteConst, Encode, EncodeCtx, FillConst, LittleEndian, PaddedConst,
+};
+use crate::iso9660::Todo;
 
 /// Primary Volume Descriptor (sector 16 on PSX disks)
 ///```plaintext
@@ -92,11 +94,7 @@ impl Encode for StandardIdentifier {
     fn size(&self) -> usize {
         5
     }
-    fn encode<W: super::DiscWrite>(
-        &self,
-        writer: &mut W,
-        ctx: &crate::EncodeCtx,
-    ) -> std::io::Result<()> {
+    fn encode<W: super::DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> std::io::Result<()> {
         "CD001".encode(writer, ctx)
     }
 }
@@ -107,11 +105,7 @@ impl Encode for SystemIdentifier {
     fn size(&self) -> usize {
         "PLAYSTATION".len()
     }
-    fn encode<W: super::DiscWrite>(
-        &self,
-        writer: &mut W,
-        ctx: &crate::EncodeCtx,
-    ) -> std::io::Result<()> {
+    fn encode<W: super::DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> std::io::Result<()> {
         "PLAYSTATION".encode(writer, ctx)
     }
 }
@@ -123,10 +117,20 @@ impl Encode for SystemIdentifier {
 ///  098h 4    Path Table 4 Block Number     (32bit big-endian) (or 0=None)
 /// ```
 struct PathTableBlockNumbers {
-    pt_1: u32,
-    pt_2: u32,
-    pt_3: u32,
-    pt_4: u32,
+    pt_1: LittleEndian<u32>,
+    pt_2: LittleEndian<u32>,
+    pt_3: BigEndian<u32>,
+    pt_4: BigEndian<u32>,
+}
+
+impl Encode for PathTableBlockNumbers {
+    fn encode<W: super::DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> std::io::Result<()> {
+        self.pt_1.encode(writer, ctx)?;
+        self.pt_2.encode(writer, ctx)?;
+        self.pt_3.encode(writer, ctx)?;
+        self.pt_4.encode(writer, ctx)?;
+        Ok(())
+    }
 }
 
 type RootDirectoryRecord = Todo;
@@ -137,11 +141,7 @@ impl Encode for ApplicationIdentifier {
     fn size(&self) -> usize {
         128
     }
-    fn encode<W: super::DiscWrite>(
-        &self,
-        writer: &mut W,
-        ctx: &crate::EncodeCtx,
-    ) -> std::io::Result<()> {
+    fn encode<W: super::DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> std::io::Result<()> {
         PaddedConst::new::<128>("PLAYSTATION").encode(writer, ctx)
     }
 }
@@ -152,11 +152,7 @@ impl Encode for VolumeZeroTimestamp {
     fn size(&self) -> usize {
         17
     }
-    fn encode<W: super::DiscWrite>(
-        &self,
-        writer: &mut W,
-        ctx: &crate::EncodeCtx,
-    ) -> std::io::Result<()> {
+    fn encode<W: super::DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> std::io::Result<()> {
         PaddedConst::new::<17>("0000000000000000").encode(writer, ctx)
     }
 }
@@ -167,11 +163,115 @@ impl Encode for CdXAIdentSignature {
     fn size(&self) -> usize {
         "CD-XA001".len()
     }
-    fn encode<W: super::DiscWrite>(
-        &self,
-        writer: &mut W,
-        ctx: &crate::EncodeCtx,
-    ) -> std::io::Result<()> {
+    fn encode<W: super::DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> std::io::Result<()> {
         "CD-XA001".encode(writer, ctx)
+    }
+}
+
+impl Encode for PrimaryVolumeDescriptor {
+    fn encode<W: super::DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> std::io::Result<()> {
+        let PrimaryVolumeDescriptor {
+            desc_type,
+            std_ident,
+            desc_ver,
+            _res_01,
+            sys_ident,
+            vol_ident,
+            _res_02,
+            vol_space_size,
+            _res_03,
+            vol_set_size,
+            vol_seq_number,
+            lbs_bytes,
+            pt_bytes,
+            pt_block_num,
+            root_dir_record,
+            vol_set_ident,
+            publisher_ident,
+            data_prep_ident,
+            app_ident,
+            copyright_file,
+            abstract_file,
+            bibliographic_file,
+            vol_creation_time,
+            vol_modification_time,
+            vol_expiration_time,
+            vol_effective_time,
+            file_structure_ver,
+            _res_04,
+            app_use_area_01,
+            cdxa_ident_sig,
+            cdxa_flags,
+            cdxa_startup_dir,
+            cdxa_reserved,
+            app_use_area_02,
+            _res_05,
+        } = self;
+        desc_type.encode(writer, ctx)?;
+        std_ident.encode(writer, ctx)?;
+        desc_ver.encode(writer, ctx)?;
+        _res_01.encode(writer, ctx)?;
+        sys_ident.encode(writer, ctx)?;
+        vol_ident.encode(writer, ctx)?;
+        _res_02.encode(writer, ctx)?;
+        vol_space_size.encode(writer, ctx)?;
+        _res_03.encode(writer, ctx)?;
+        vol_set_size.encode(writer, ctx)?;
+        vol_seq_number.encode(writer, ctx)?;
+        lbs_bytes.encode(writer, ctx)?;
+        pt_bytes.encode(writer, ctx)?;
+        pt_block_num.encode(writer, ctx)?;
+        root_dir_record.encode(writer, ctx)?;
+        vol_set_ident.encode(writer, ctx)?;
+        publisher_ident.encode(writer, ctx)?;
+        data_prep_ident.encode(writer, ctx)?;
+        app_ident.encode(writer, ctx)?;
+        copyright_file.encode(writer, ctx)?;
+        abstract_file.encode(writer, ctx)?;
+        bibliographic_file.encode(writer, ctx)?;
+        vol_creation_time.encode(writer, ctx)?;
+        vol_modification_time.encode(writer, ctx)?;
+        vol_expiration_time.encode(writer, ctx)?;
+        vol_effective_time.encode(writer, ctx)?;
+        file_structure_ver.encode(writer, ctx)?;
+        _res_04.encode(writer, ctx)?;
+        app_use_area_01.encode(writer, ctx)?;
+        cdxa_ident_sig.encode(writer, ctx)?;
+        cdxa_flags.encode(writer, ctx)?;
+        cdxa_startup_dir.encode(writer, ctx)?;
+        cdxa_reserved.encode(writer, ctx)?;
+        app_use_area_02.encode(writer, ctx)?;
+        _res_05.encode(writer, ctx)?;
+        Ok(())
+    }
+}
+
+/// # Volume Descriptor Set Terminator (sector 17 on PSX disks)
+/// ```plaintext
+///   000h 1    Volume Descriptor Type    (FFh=Terminator)
+///   001h 5    Standard Identifier       ("CD001")
+///   006h 1    Terminator Version        (01h=Standard)
+///   007h 2041 Reserved                  (00h-filled)
+/// ```
+pub struct VolumeDescriptorSetTerminator {
+    desc_ty:        ByteConst<0xff>,
+    standard_ident: StandardIdentifier,
+    terminator_ver: ByteConst<0x01>,
+    zerofill:       FillConst<0x0, 2041>,
+}
+
+impl Encode for VolumeDescriptorSetTerminator {
+    fn encode<W: super::DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> std::io::Result<()> {
+        let VolumeDescriptorSetTerminator {
+            desc_ty,
+            standard_ident,
+            terminator_ver,
+            zerofill,
+        } = self;
+        desc_ty.encode(writer, ctx)?;
+        standard_ident.encode(writer, ctx)?;
+        terminator_ver.encode(writer, ctx)?;
+        zerofill.encode(writer, ctx)?;
+        Ok(())
     }
 }
