@@ -3,10 +3,15 @@
 //! module for the primary volume descriptor (sector 16) and the descriptor set
 //! terminator (sector 17).
 
+use snafu::Snafu;
+
 use crate::encoders::{
-    BigEndian, ByteConst, Encode, EncodeCtx, FillConst, LittleEndian, PaddedConst,
+    BigEndian, ByteConst, Encode, EncodeCtx, EncodeError, FillConst, LittleEndian, PaddedConst,
+    StrToAsciiError, str_to_ascii_buf,
 };
-use crate::iso9660::Todo;
+use crate::iso9660::fs::{DirectoryRecord, DirectoryRecordBuilder, Filename, SystemUse, Timestamp};
+
+use super::fs::FileFlags;
 
 /// Primary Volume Descriptor (sector 16 on PSX disks)
 ///```plaintext
@@ -88,13 +93,128 @@ pub struct PrimaryVolumeDescriptor {
     _res_05:               FillConst<0x0, 653>,
 }
 
+#[derive(Debug, Clone, Snafu)]
+pub enum PrimaryVolumeDescriptorError {
+    #[snafu(display("volume identifier ascii error: {source}"))]
+    VolumeIdentifierAsciiErr { source: StrToAsciiError },
+    #[snafu(display("publisher identifier ascii error: {source}"))]
+    PublisherIdentifierAsciiErr { source: StrToAsciiError },
+    #[snafu(display("vol set identifier ascii error: {source}"))]
+    VolumeSetIdentifierAsciiErr { source: StrToAsciiError },
+    #[snafu(display("data prep identifier ascii error: {source}"))]
+    DataPrepIdentifierAsciiErr { source: StrToAsciiError },
+    #[snafu(display("copyright file ascii error: {source}"))]
+    CopyrightFileAsciiErr { source: StrToAsciiError },
+    #[snafu(display("abstract file ascii error: {source}"))]
+    AbstractFileAsciiErr { source: StrToAsciiError },
+    #[snafu(display("bibliographic file ascii error: {source}"))]
+    BibliographicFileAsciiErr { source: StrToAsciiError },
+}
+
+pub struct PrimaryVolumeDescriptorSpec<'a> {
+    pub vol_ident:          Option<&'a str>,
+    pub vol_space_size:     [u32; 2],
+    pub vol_set_size:       [u16; 2],
+    pub vol_seq_number:     [u16; 2],
+    pub lbs_bytes:          [u16; 2],
+    pub pt_bytes:           [u32; 2],
+    pub pt_block_num:       PathTableBlockNumbers,
+    pub vol_set_ident:      Option<&'a str>,
+    pub publisher_ident:    Option<&'a str>,
+    pub data_prep_ident:    Option<&'a str>,
+    pub copyright_file:     Option<&'a str>,
+    pub abstract_file:      Option<&'a str>,
+    pub bibliographic_file: Option<&'a str>,
+}
+
+impl PrimaryVolumeDescriptor {
+    pub fn new(
+        PrimaryVolumeDescriptorSpec {
+            vol_ident,
+            vol_space_size,
+            vol_set_size,
+            vol_seq_number,
+            lbs_bytes,
+            pt_bytes,
+            pt_block_num,
+            vol_set_ident,
+            publisher_ident,
+            data_prep_ident,
+            copyright_file,
+            abstract_file,
+            bibliographic_file,
+        }: PrimaryVolumeDescriptorSpec,
+    ) -> Result<Self, PrimaryVolumeDescriptorError> {
+        let vol_ident = str_to_ascii_buf(vol_ident.unwrap_or(""))
+            .map_err(|source| PrimaryVolumeDescriptorError::VolumeIdentifierAsciiErr { source })?;
+        let vol_set_ident = str_to_ascii_buf(vol_set_ident.unwrap_or("")).map_err(|source| {
+            PrimaryVolumeDescriptorError::VolumeSetIdentifierAsciiErr { source }
+        })?;
+        let publisher_ident =
+            str_to_ascii_buf(publisher_ident.unwrap_or("")).map_err(|source| {
+                PrimaryVolumeDescriptorError::PublisherIdentifierAsciiErr { source }
+            })?;
+        let data_prep_ident =
+            str_to_ascii_buf(data_prep_ident.unwrap_or("")).map_err(|source| {
+                PrimaryVolumeDescriptorError::DataPrepIdentifierAsciiErr { source }
+            })?;
+        let copyright_file = str_to_ascii_buf(copyright_file.unwrap_or(""))
+            .map_err(|source| PrimaryVolumeDescriptorError::CopyrightFileAsciiErr { source })?;
+        let abstract_file = str_to_ascii_buf(abstract_file.unwrap_or(""))
+            .map_err(|source| PrimaryVolumeDescriptorError::AbstractFileAsciiErr { source })?;
+        let bibliographic_file = str_to_ascii_buf(bibliographic_file.unwrap_or(""))
+            .map_err(|source| PrimaryVolumeDescriptorError::BibliographicFileAsciiErr { source })?;
+        Ok(Self {
+            desc_type: ByteConst,
+            std_ident: StandardIdentifier,
+            desc_ver: ByteConst,
+            _res_01: ByteConst,
+            sys_ident: PaddedConst::new(SystemIdentifier),
+            vol_ident: PaddedConst::new(vol_ident),
+            _res_02: FillConst,
+            vol_space_size,
+            _res_03: FillConst,
+            vol_set_size,
+            vol_seq_number,
+            lbs_bytes,
+            pt_bytes,
+            pt_block_num,
+            root_dir_record: RootDirectoryRecord,
+            vol_set_ident,
+            publisher_ident,
+            data_prep_ident,
+            app_ident: ApplicationIdentifier,
+            copyright_file,
+            abstract_file,
+            bibliographic_file,
+            vol_creation_time: VolumeZeroTimestamp,
+            vol_modification_time: VolumeZeroTimestamp,
+            vol_expiration_time: VolumeZeroTimestamp,
+            vol_effective_time: VolumeZeroTimestamp,
+            file_structure_ver: ByteConst,
+            _res_04: ByteConst,
+            app_use_area_01: FillConst,
+            cdxa_ident_sig: CdXAIdentSignature,
+            cdxa_flags: FillConst,
+            cdxa_startup_dir: FillConst,
+            cdxa_reserved: FillConst,
+            app_use_area_02: FillConst,
+            _res_05: FillConst,
+        })
+    }
+}
+
 struct StandardIdentifier;
 
 impl Encode for StandardIdentifier {
     fn size(&self) -> usize {
         5
     }
-    fn encode<W: super::DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> std::io::Result<()> {
+    fn encode<W: ?Sized + super::DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         "CD001".encode(writer, ctx)
     }
 }
@@ -105,7 +225,11 @@ impl Encode for SystemIdentifier {
     fn size(&self) -> usize {
         "PLAYSTATION".len()
     }
-    fn encode<W: super::DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> std::io::Result<()> {
+    fn encode<W: ?Sized + super::DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         "PLAYSTATION".encode(writer, ctx)
     }
 }
@@ -116,15 +240,19 @@ impl Encode for SystemIdentifier {
 ///  094h 4    Path Table 3 Block Number     (32bit big-endian)
 ///  098h 4    Path Table 4 Block Number     (32bit big-endian) (or 0=None)
 /// ```
-struct PathTableBlockNumbers {
-    pt_1: LittleEndian<u32>,
-    pt_2: LittleEndian<u32>,
-    pt_3: BigEndian<u32>,
-    pt_4: BigEndian<u32>,
+pub struct PathTableBlockNumbers {
+    pub pt_1: LittleEndian<u32>,
+    pub pt_2: LittleEndian<u32>,
+    pub pt_3: BigEndian<u32>,
+    pub pt_4: BigEndian<u32>,
 }
 
 impl Encode for PathTableBlockNumbers {
-    fn encode<W: super::DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> std::io::Result<()> {
+    fn encode<W: ?Sized + super::DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         self.pt_1.encode(writer, ctx)?;
         self.pt_2.encode(writer, ctx)?;
         self.pt_3.encode(writer, ctx)?;
@@ -133,7 +261,26 @@ impl Encode for PathTableBlockNumbers {
     }
 }
 
-type RootDirectoryRecord = Todo;
+struct RootDirectoryRecord;
+
+impl Encode for RootDirectoryRecord {
+    fn encode<W: ?Sized + super::DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
+        let record = DirectoryRecord::new(DirectoryRecordBuilder {
+            filename:   Filename::from_ascii_str("")
+                .expect("error getting ascii filename for root directory record"),
+            system_use: SystemUse::root(),
+            data_lba:   [22, 0],
+            data_size:  [0, 0],
+            timestamp:  Timestamp::now(),
+            flags:      FileFlags::Directory,
+        });
+        record.encode(writer, ctx)
+    }
+}
 
 struct ApplicationIdentifier;
 
@@ -141,7 +288,11 @@ impl Encode for ApplicationIdentifier {
     fn size(&self) -> usize {
         128
     }
-    fn encode<W: super::DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> std::io::Result<()> {
+    fn encode<W: ?Sized + super::DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         PaddedConst::new::<128>("PLAYSTATION").encode(writer, ctx)
     }
 }
@@ -152,7 +303,11 @@ impl Encode for VolumeZeroTimestamp {
     fn size(&self) -> usize {
         17
     }
-    fn encode<W: super::DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> std::io::Result<()> {
+    fn encode<W: ?Sized + super::DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         PaddedConst::new::<17>("0000000000000000").encode(writer, ctx)
     }
 }
@@ -163,13 +318,21 @@ impl Encode for CdXAIdentSignature {
     fn size(&self) -> usize {
         "CD-XA001".len()
     }
-    fn encode<W: super::DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> std::io::Result<()> {
+    fn encode<W: ?Sized + super::DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         "CD-XA001".encode(writer, ctx)
     }
 }
 
 impl Encode for PrimaryVolumeDescriptor {
-    fn encode<W: super::DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> std::io::Result<()> {
+    fn encode<W: ?Sized + super::DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         let PrimaryVolumeDescriptor {
             desc_type,
             std_ident,
@@ -261,7 +424,11 @@ pub struct VolumeDescriptorSetTerminator {
 }
 
 impl Encode for VolumeDescriptorSetTerminator {
-    fn encode<W: super::DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> std::io::Result<()> {
+    fn encode<W: ?Sized + super::DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         let VolumeDescriptorSetTerminator {
             desc_ty,
             standard_ident,

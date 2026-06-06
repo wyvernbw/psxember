@@ -8,8 +8,9 @@ use std::marker::{Destruct, PhantomData};
 
 use arbitrary_int::prelude::*;
 use bitbybit::{bitfield, *};
+use snafu::{ResultExt, whatever};
 
-use crate::encoders::{Encode, EncodeCtx, Fill};
+use crate::encoders::{Encode, EncodeCtx, EncodeError, Fill};
 
 #[bitfield(u8, debug)]
 pub struct Bcd {
@@ -25,12 +26,14 @@ pub struct Bcd {
 pub struct Lba(u64);
 
 pub trait DiscWrite: Write + Seek {
-    fn lba(&mut self) -> io::Result<Lba> {
-        let pos = self.stream_position()?;
+    fn lba(&mut self) -> crate::Result<Lba> {
+        let pos = self
+            .stream_position()
+            .with_whatever_context(|_| format!("failed to get stream position"))?;
         let lba = pos / SECTOR_RAW_SIZE as u64;
         Ok(Lba(lba))
     }
-    fn address(&mut self) -> io::Result<Mss<Bcd>> {
+    fn address(&mut self) -> crate::Result<Mss<Bcd>> {
         self.lba().map(|lba| lba.to_mss())
     }
 }
@@ -150,7 +153,11 @@ pub enum SectSize {
 type Todo = ();
 
 impl Encode for Todo {
-    fn encode<W: DiscWrite>(&self, writer: &mut W, _ctx: &EncodeCtx) -> io::Result<()> {
+    fn encode<W: ?Sized + DiscWrite>(
+        &self,
+        writer: &mut W,
+        _ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         // todo!()
         Ok(())
     }
@@ -203,7 +210,11 @@ struct ChannelNumber(u8);
 macro_rules! impl_encode_newtype {
     ($type:ty) => {
         impl Encode for $type {
-            fn encode<W: DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> io::Result<()> {
+            fn encode<W: ?Sized + DiscWrite>(
+                &self,
+                writer: &mut W,
+                ctx: &EncodeCtx,
+            ) -> Result<(), EncodeError> {
                 self.0.encode(writer, ctx)
             }
         }
@@ -308,7 +319,11 @@ enum LicenseString {
 }
 
 impl Encode for SyncHeader {
-    fn encode<W: DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> io::Result<()> {
+    fn encode<W: ?Sized + DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         let pattern = &[
             0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00,
         ];
@@ -322,7 +337,11 @@ impl Encode for SyncHeader {
 }
 
 impl<T: Encode> Encode for Mss<T> {
-    fn encode<W: DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> io::Result<()> {
+    fn encode<W: ?Sized + DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         self.min.encode(writer, ctx)?;
         self.sec.encode(writer, ctx)?;
         self.sect.encode(writer, ctx)?;
@@ -331,20 +350,32 @@ impl<T: Encode> Encode for Mss<T> {
 }
 
 impl Encode for Bcd {
-    fn encode<W: DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> io::Result<()> {
+    fn encode<W: ?Sized + DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         self.raw_value().encode(writer, ctx)
     }
 }
 
 impl Encode for HeaderMode {
-    fn encode<W: DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> io::Result<()> {
+    fn encode<W: ?Sized + DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         let mode = *self as u8;
         mode.encode(writer, ctx)
     }
 }
 
 impl Encode for Header {
-    fn encode<W: DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> io::Result<()> {
+    fn encode<W: ?Sized + DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         self.mss.encode(writer, ctx)?;
         self.mode.encode(writer, ctx)?;
         Ok(())
@@ -352,13 +383,21 @@ impl Encode for Header {
 }
 
 impl Encode for Submode {
-    fn encode<W: DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> io::Result<()> {
+    fn encode<W: ?Sized + DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         self.raw_value().encode(writer, ctx)
     }
 }
 
 impl Encode for Subheader {
-    fn encode<W: DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> io::Result<()> {
+    fn encode<W: ?Sized + DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         self.file.encode(writer, ctx)?;
         self.channel.encode(writer, ctx)?;
         self.submode.encode(writer, ctx)?;
@@ -373,7 +412,11 @@ struct DataBlock<'a, T: Encode, F> {
 }
 
 impl<T: Encode, F> DataBlock<'_, T, F> {
-    fn encode_impl<W: DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> io::Result<()>
+    fn encode_impl<W: ?Sized + DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError>
     where
         Self: Encode,
     {
@@ -416,7 +459,11 @@ impl<T: Encode> Encode for DataBlock<'_, T, Form1Sector<T>> {
     fn size(&self) -> usize {
         0x800
     }
-    fn encode<W: DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> io::Result<()> {
+    fn encode<W: ?Sized + DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         self.encode_impl(writer, ctx)
     }
 }
@@ -425,13 +472,21 @@ impl<T: Encode> Encode for DataBlock<'_, T, Form2Sector<T>> {
     fn size(&self) -> usize {
         0x924
     }
-    fn encode<W: DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> io::Result<()> {
+    fn encode<W: ?Sized + DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         self.encode_impl(writer, ctx)
     }
 }
 
 impl<T: Encode> Encode for Form1Sector<T> {
-    fn encode<W: DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> io::Result<()> {
+    fn encode<W: ?Sized + DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         self.sync.encode(writer, ctx)?;
         self.header.encode(writer, ctx)?;
         self.subheader.encode(writer, ctx)?;
@@ -506,7 +561,11 @@ pub struct Form2Sector<T> {
 }
 
 impl<T: Encode> Encode for Form2Sector<T> {
-    fn encode<W: DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> io::Result<()> {
+    fn encode<W: ?Sized + DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         self.sync.encode(writer, ctx)?;
         self.header.encode(writer, ctx)?;
         self.subheader.encode(writer, ctx)?;
@@ -521,7 +580,11 @@ impl<T: Encode> Encode for Form2Sector<T> {
 }
 
 impl Encode for LicenseString {
-    fn encode<W: DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> io::Result<()> {
+    fn encode<W: ?Sized + DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         "          Licensed  by          ".encode(writer, ctx)?;
         match self {
             LicenseString::EU => {
@@ -560,7 +623,11 @@ impl Encode for LicenseString {
 }
 
 impl Encode for PsxSystemArea {
-    fn encode<W: DiscWrite>(&self, writer: &mut W, ctx: &EncodeCtx) -> io::Result<()> {
+    fn encode<W: ?Sized + DiscWrite>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
         for _ in 0..=3 {
             let bytes_in_sector = 0x800;
             let address = writer.address()?;

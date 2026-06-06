@@ -7,3 +7,8 @@ edition = "2024"
 arbitrary-int = "2.1.1"
 bitbybit = "2.0.0"
 derive_more = { version = "2.1.1", features = ["deref", "deref_mut", "display"] }
+snafu = { version = "0.9.1", features = ["backtrace"] }
+
+[dev-dependencies]
+miette = { version = "7.6.0", features = ["fancy"] }
+
