@@ -16,7 +16,7 @@ fn write_disc() -> crate::Result<()> {
     sys.encode(&mut f, &encode_ctx)?;
 
     let desc = PrimaryVolumeDescriptor::new(PrimaryVolumeDescriptorSpec {
-        vol_ident:          Some("my volume"),
+        vol_ident:          Some("MY_VOLUME"),
         vol_space_size:     [0; 2],
         vol_set_size:       [0; 2],
         vol_seq_number:     [0; 2],

@@ -1,7 +1,8 @@
+use std::marker::PhantomData;
 use std::simd::cmp::{SimdPartialEq, SimdPartialOrd};
-use std::simd::{mask8x64, u8x8, u8x64};
+use std::simd::u8x8;
 
-use miette::{Diagnostic, IntoDiagnostic, LabeledSpan, SourceOffset, SourceSpan, miette};
+use miette::{Diagnostic, IntoDiagnostic, LabeledSpan, SourceSpan, miette};
 use thiserror::Error;
 
 use crate::iso9660::{Bcd, DiscWrite, Mss};
@@ -283,7 +284,10 @@ pub fn str_to_ascii_buf<const N: usize>(str: &str) -> Result<[u8; N], StrToAscii
 #[derive(Debug, Clone, Copy)]
 pub struct DChar(u8);
 #[derive(Debug, Clone, Error, Diagnostic)]
-#[error("byte '{src}' is not a vaild dchar")]
+#[error("value '{src}' is not vaild dchar data")]
+#[diagnostic(
+    help = "dchars are numbers '0' through '9', letters 'A' through 'Z' (uppercase), and '_'"
+)]
 pub struct DCharError {
     #[source_code]
     src: String,
@@ -306,14 +310,41 @@ impl DChar {
     }
 }
 
-pub struct DCharBuf<'a> {
-    bytes: &'a [u8],
+#[derive(Debug, Clone)]
+pub struct DCharBuf<'a, B: Buffer<'a>> {
+    bytes: B,
+    len:   usize,
+    _ty:   PhantomData<&'a [u8]>,
 }
 
-impl<'a> DCharBuf<'a> {
+impl<'a, B: Buffer<'a> + std::fmt::Debug> Encode for DCharBuf<'a, B> {
+    fn encode<W: DiscWrite + ?Sized>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
+        let bytes = &self.bytes.as_bytes()[..self.len];
+        writer.write_all(bytes).into_diagnostic()?;
+        let remaining = self.bytes.as_bytes().len().saturating_sub(self.len);
+        // pad remaining dchar buffer with spaces
+        Fill::new(remaining, b" ").encode(writer, ctx)?;
+
+        Ok(())
+    }
+}
+
+impl<'a, B: Buffer<'a>> DCharBuf<'a, B> {
     #[inline(never)]
-    pub fn new(bytes: &'a [u8]) -> Result<Self, DCharError> {
-        let (chunks, rem) = bytes.as_chunks::<8>();
+    pub fn new(bytes: B, len: usize) -> Result<Self, DCharError> {
+        let len = len.min(bytes.as_bytes().len());
+        let Some(bytes_slice) = bytes.as_bytes().get(..len) else {
+            return Ok(Self {
+                bytes,
+                len,
+                _ty: PhantomData,
+            });
+        };
+        let (chunks, rem) = bytes_slice.as_bytes().as_chunks::<8>();
         for chunk_bytes in chunks {
             let chunk = u8x8::from_slice(chunk_bytes);
 
@@ -340,7 +371,32 @@ impl<'a> DCharBuf<'a> {
             DChar::new(*byte)?;
         }
 
-        Ok(Self { bytes })
+        Ok(Self {
+            bytes,
+            _ty: PhantomData,
+            len,
+        })
+    }
+}
+
+pub trait Buffer<'a> {
+    fn as_bytes(&self) -> &[u8];
+}
+
+impl Buffer<'static> for Vec<u8> {
+    fn as_bytes(&self) -> &[u8] {
+        self
+    }
+}
+impl<'a> Buffer<'a> for &'a [u8] {
+    fn as_bytes(&self) -> &[u8] {
+        self
+    }
+}
+
+impl<const N: usize> Buffer<'static> for [u8; N] {
+    fn as_bytes(&self) -> &[u8] {
+        self
     }
 }
 
@@ -356,9 +412,9 @@ fn invalid_dchar() {
 #[cfg(test)]
 fn dchar_buffer() {
     let buffer = "HELLOWORLD_1".as_bytes();
-    assert!(DCharBuf::new(buffer).is_ok());
+    assert!(DCharBuf::new(buffer, buffer.len()).is_ok());
     let buffer = "HELLO_world_1".as_bytes();
-    assert!(DCharBuf::new(buffer).is_err())
+    assert!(DCharBuf::new(buffer, buffer.len()).is_err())
 }
 
 #[test]
@@ -366,5 +422,7 @@ fn dchar_buffer() {
 #[should_panic]
 fn dchar_buffer_error() {
     let buffer = "HELLO_world_1".as_bytes();
-    DCharBuf::new(buffer).into_diagnostic().unwrap();
+    DCharBuf::new(buffer, buffer.len())
+        .into_diagnostic()
+        .unwrap();
 }

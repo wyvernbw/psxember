@@ -7,8 +7,8 @@ use miette::Diagnostic;
 use thiserror::Error;
 
 use crate::encoders::{
-    BigEndian, ByteConst, Encode, EncodeCtx, EncodeError, FillConst, LittleEndian, PaddedConst,
-    StrToAsciiError, str_to_ascii_buf,
+    BigEndian, ByteConst, DCharBuf, DCharError, Encode, EncodeCtx, EncodeError, FillConst,
+    LittleEndian, PaddedConst, StrToAsciiError, str_to_ascii_buf,
 };
 use crate::iso9660::fs::{DirectoryRecord, DirectoryRecordBuilder, Filename, SystemUse, Timestamp};
 
@@ -61,7 +61,7 @@ pub struct PrimaryVolumeDescriptor {
     desc_ver:              ByteConst<0x01>,
     _res_01:               ByteConst<0x00>,
     sys_ident:             PaddedConst<SystemIdentifier, 32>,
-    vol_ident:             PaddedConst<[u8; 8], 32>,
+    vol_ident:             PaddedConst<DCharBuf<'static, [u8; 8]>, 32>,
     _res_02:               FillConst<0x0, 8>,
     vol_space_size:        [u32; 2],
     _res_03:               FillConst<0x0, 32>,
@@ -72,7 +72,7 @@ pub struct PrimaryVolumeDescriptor {
     pt_bytes:              [u32; 2],
     pt_block_num:          PathTableBlockNumbers,
     root_dir_record:       RootDirectoryRecord,
-    vol_set_ident:         [u8; 128],
+    vol_set_ident:         DCharBuf<'static, [u8; 128]>,
     publisher_ident:       [u8; 128],
     data_prep_ident:       [u8; 128],
     app_ident:             ApplicationIdentifier,
@@ -98,6 +98,13 @@ pub struct PrimaryVolumeDescriptor {
 pub enum PrimaryVolumeDescriptorError {
     #[error(transparent)]
     AsciiError(#[from] StrToAsciiError),
+    #[error("dchar validation error for {field}")]
+    DCharError {
+        #[source]
+        #[diagnostic_source]
+        source: DCharError,
+        field:  String,
+    },
 }
 
 pub struct PrimaryVolumeDescriptorSpec<'a> {
@@ -134,8 +141,23 @@ impl PrimaryVolumeDescriptor {
             bibliographic_file,
         }: PrimaryVolumeDescriptorSpec,
     ) -> Result<Self, PrimaryVolumeDescriptorError> {
-        let vol_ident = str_to_ascii_buf(vol_ident.unwrap_or(""))?;
-        let vol_set_ident = str_to_ascii_buf(vol_set_ident.unwrap_or(""))?;
+        let vol_ident_str = vol_ident.unwrap_or("");
+        let vol_ident = str_to_ascii_buf(vol_ident_str)?;
+        let vol_ident = DCharBuf::new(vol_ident, vol_ident_str.len()).map_err(|err| {
+            PrimaryVolumeDescriptorError::DCharError {
+                source: err,
+                field:  "volume identifier".to_string(),
+            }
+        })?;
+        let vol_set_ident_str = vol_set_ident.unwrap_or("");
+        let vol_set_ident = str_to_ascii_buf(vol_set_ident_str)?;
+        let vol_set_ident =
+            DCharBuf::new(vol_set_ident, vol_set_ident_str.len()).map_err(|err| {
+                PrimaryVolumeDescriptorError::DCharError {
+                    source: err,
+                    field:  "volume set identifier".to_string(),
+                }
+            })?;
         let publisher_ident = str_to_ascii_buf(publisher_ident.unwrap_or(""))?;
         let data_prep_ident = str_to_ascii_buf(data_prep_ident.unwrap_or(""))?;
         let copyright_file = str_to_ascii_buf(copyright_file.unwrap_or(""))?;
