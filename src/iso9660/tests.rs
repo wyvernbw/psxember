@@ -31,7 +31,7 @@ fn write_disc() -> crate::Result<()> {
         vol_set_ident:      None,
         publisher_ident:    Some("WOOYVERN INC."),
         data_prep_ident:    None,
-        copyright_file:     Some("copyright.txt"),
+        copyright_file:     Some("COPYRIGHT.TXT"),
         abstract_file:      None,
         bibliographic_file: None,
     })?;

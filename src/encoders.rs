@@ -137,7 +137,7 @@ impl<T> From<T> for BigEndian<T> {
     }
 }
 
-pub struct PaddedConst<T: Encode, const N: usize> {
+pub struct PaddedConst<T: Encode, const N: usize, const PAD: u8 = 0> {
     data: T,
 }
 
@@ -146,9 +146,16 @@ impl<T: Encode> PaddedConst<T, 0> {
     pub fn new<const SIZE: usize>(data: T) -> PaddedConst<T, SIZE> {
         PaddedConst { data }
     }
+
+    #[must_use]
+    pub fn new_with_padding<const SIZE: usize, const PAD: u8>(
+        data: T,
+    ) -> PaddedConst<T, SIZE, PAD> {
+        PaddedConst { data }
+    }
 }
 
-impl<T: Encode, const N: usize> Encode for PaddedConst<T, N> {
+impl<T: Encode, const N: usize, const PAD: u8> Encode for PaddedConst<T, N, PAD> {
     fn size(&self) -> usize {
         N
     }
@@ -166,12 +173,13 @@ impl<T: Encode, const N: usize> Encode for PaddedConst<T, N> {
             block_size
         );
         let padding = block_size.saturating_sub(self.data.size());
-        let fill = Fill::zero(padding);
+        let fill = Fill::new(padding, &[PAD]);
         self.data.encode(writer, ctx)?;
         fill.encode(writer, ctx)?;
         Ok(())
     }
 }
+
 pub struct Fill {
     pub pattern:     &'static [u8],
     pub total_bytes: usize,
@@ -299,7 +307,8 @@ pub trait CharBuf<'a, B: Buffer<'a>>: Sized {
         let len = len.min(bytes.as_bytes().len());
         let bytes_slice = &bytes.as_bytes()[..len];
         let (chunks, rem) = bytes_slice.as_bytes().as_chunks::<8>();
-        for chunk_bytes in chunks {
+        let chunks_n = chunks.len() * 8;
+        for (chunk_i, chunk_bytes) in chunks.iter().enumerate() {
             let chunk = u8x8::from_slice(chunk_bytes);
             let in_valid_range = Self::VALID_RANGES
                 .iter()
@@ -318,11 +327,11 @@ pub trait CharBuf<'a, B: Buffer<'a>>: Sized {
 
             let valid = in_valid_range | in_valid_chars;
             if !valid.all() {
-                let first_zero = valid.to_bitmask().trailing_ones();
-                return Err(Self::make_error(chunk_bytes, first_zero as usize));
+                let first_zero = chunk_i * 8 + valid.to_bitmask().trailing_ones() as usize;
+                return Err(Self::make_error(bytes.as_bytes(), first_zero));
             }
         }
-        for byte in rem {
+        for (i, byte) in rem.iter().enumerate() {
             let in_valid_range = Self::VALID_RANGES
                 .iter()
                 .map(|valid| valid.contains(byte))
@@ -337,7 +346,7 @@ pub trait CharBuf<'a, B: Buffer<'a>>: Sized {
 
             let valid = in_valid_range | in_valid_chars;
             if !valid {
-                return Err(Self::make_error(&[*byte], 0));
+                return Err(Self::make_error(bytes.as_bytes(), i + chunks_n));
             }
         }
 
@@ -366,7 +375,7 @@ pub trait CharBuf<'a, B: Buffer<'a>>: Sized {
 #[derive(Debug, Clone, Copy)]
 pub struct DChar(u8);
 #[derive(Debug, Clone, Error, Diagnostic)]
-#[error("value '{src}' is not vaild dchar data")]
+#[error("value '{src}' is not valid dchar data")]
 #[diagnostic(
     help = "dchars are numbers '0' through '9', letters 'A' through 'Z' (uppercase), and '_'"
 )]
@@ -447,6 +456,74 @@ impl<'a, B: Buffer<'a>> DCharBuf<'a, B> {
     }
 }
 
+#[derive(Debug, Clone, Error, Diagnostic)]
+#[error("value '{src}' is not valid achar data")]
+#[diagnostic(
+    help = r#"achars are numbers '0' through '9', letters 'A' through 'Z' (uppercase), and '!"%&'()*+,-./:;<=>?_' characters."#r,
+)]
+pub struct ACharError {
+    #[source_code]
+    src: String,
+
+    #[label("not an a-char")]
+    char_label: SourceSpan,
+}
+#[derive(Debug, Clone)]
+pub struct ACharBuf<'a, B: Buffer<'a>> {
+    bytes: B,
+    len:   usize,
+    _ty:   PhantomData<&'a [u8]>,
+}
+
+impl<'a, B: Buffer<'a>> CharBuf<'a, B> for ACharBuf<'a, B> {
+    const VALID_RANGES: &'static [RangeInclusive<u8>] = &[b'0'..=b'9', b'A'..=b'Z'];
+
+    const VALID_CHARS: &'static [u8] = br#"!"%&'()*+,-./:;<=>?_ "#;
+
+    type ValidationErr = ACharError;
+
+    fn bytes(&self) -> &[u8] {
+        self.bytes.as_bytes()
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn make_error(src: &[u8], offset: usize) -> Self::ValidationErr {
+        ACharError {
+            src:        std::str::from_utf8(src)
+                .expect("not valid utf8")
+                .to_string(),
+            char_label: (offset, 1).into(),
+        }
+    }
+
+    fn from_parts(bytes: B, len: usize) -> Self {
+        Self {
+            bytes,
+            len,
+            _ty: PhantomData,
+        }
+    }
+}
+
+impl<'a, B: Buffer<'a>> Encode for ACharBuf<'a, B> {
+    fn encode<W: DiscWrite + ?Sized>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
+        self.encode_chars(writer, ctx)
+    }
+}
+
+impl<'a, B: Buffer<'a>> ACharBuf<'a, B> {
+    pub fn new(bytes: B, len: usize) -> Result<Self, ACharError> {
+        Self::parse(bytes, len)
+    }
+}
+
 pub trait Buffer<'a> {
     fn as_bytes(&self) -> &[u8];
 }
@@ -482,6 +559,8 @@ fn dchar_buffer() {
     let buffer = "HELLOWORLD_1".as_bytes();
     assert!(DCharBuf::new(buffer, buffer.len()).is_ok());
     let buffer = "HELLO_world_1".as_bytes();
+    assert!(DCharBuf::new(buffer, buffer.len()).is_err());
+    let buffer = "HELLO:".as_bytes();
     assert!(DCharBuf::new(buffer, buffer.len()).is_err())
 }
 
@@ -491,6 +570,28 @@ fn dchar_buffer() {
 fn dchar_buffer_error() {
     let buffer = "HELLO_world_1".as_bytes();
     DCharBuf::new(buffer, buffer.len())
+        .into_diagnostic()
+        .unwrap();
+}
+
+#[test]
+#[cfg(test)]
+fn achar_buffer() -> miette::Result<()> {
+    let buffer = "HELLOWORLD_1".as_bytes();
+    ACharBuf::new(buffer, buffer.len())?;
+    let buffer = "%&!* YOU WORLD!".as_bytes();
+    ACharBuf::new(buffer, buffer.len())?;
+    let buffer = "HELLO_world_1".as_bytes();
+    assert!(ACharBuf::new(buffer, buffer.len()).is_err());
+    Ok(())
+}
+
+#[test]
+#[cfg(test)]
+#[should_panic]
+fn achar_buffer_error() {
+    let buffer = "HELLO_world_1".as_bytes();
+    ACharBuf::new(buffer, buffer.len())
         .into_diagnostic()
         .unwrap();
 }

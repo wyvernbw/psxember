@@ -7,8 +7,8 @@ use miette::Diagnostic;
 use thiserror::Error;
 
 use crate::encoders::{
-    BigEndian, ByteConst, DCharBuf, DCharError, Encode, EncodeCtx, EncodeError, FillConst,
-    LittleEndian, PaddedConst, StrToAsciiError, str_to_ascii_buf,
+    ACharBuf, ACharError, BigEndian, ByteConst, DCharBuf, DCharError, Encode, EncodeCtx,
+    EncodeError, FillConst, LittleEndian, PaddedConst, StrToAsciiError, str_to_ascii_buf,
 };
 use crate::iso9660::fs::{DirectoryRecord, DirectoryRecordBuilder, Filename, SystemUse, Timestamp};
 
@@ -60,8 +60,8 @@ pub struct PrimaryVolumeDescriptor {
     std_ident:             StandardIdentifier,
     desc_ver:              ByteConst<0x01>,
     _res_01:               ByteConst<0x00>,
-    sys_ident:             PaddedConst<SystemIdentifier, 32>,
-    vol_ident:             PaddedConst<DCharBuf<'static, [u8; 8]>, 32>,
+    sys_ident:             PaddedConst<SystemIdentifier, 32, b' '>,
+    vol_ident:             PaddedConst<DCharBuf<'static, [u8; 8]>, 32, b' '>,
     _res_02:               FillConst<0x0, 8>,
     vol_space_size:        [u32; 2],
     _res_03:               FillConst<0x0, 32>,
@@ -73,12 +73,12 @@ pub struct PrimaryVolumeDescriptor {
     pt_block_num:          PathTableBlockNumbers,
     root_dir_record:       RootDirectoryRecord,
     vol_set_ident:         DCharBuf<'static, [u8; 128]>,
-    publisher_ident:       [u8; 128],
-    data_prep_ident:       [u8; 128],
+    publisher_ident:       ACharBuf<'static, [u8; 128]>,
+    data_prep_ident:       ACharBuf<'static, [u8; 128]>,
     app_ident:             ApplicationIdentifier,
-    copyright_file:        [u8; 37],
-    abstract_file:         [u8; 37],
-    bibliographic_file:    [u8; 37],
+    copyright_file:        ACharBuf<'static, [u8; 37]>,
+    abstract_file:         ACharBuf<'static, [u8; 37]>,
+    bibliographic_file:    ACharBuf<'static, [u8; 37]>,
     vol_creation_time:     VolumeZeroTimestamp,
     vol_modification_time: VolumeZeroTimestamp,
     vol_expiration_time:   VolumeZeroTimestamp,
@@ -98,11 +98,18 @@ pub struct PrimaryVolumeDescriptor {
 pub enum PrimaryVolumeDescriptorError {
     #[error(transparent)]
     AsciiError(#[from] StrToAsciiError),
-    #[error("dchar validation error for {field}")]
+    #[error("d-char validation error for {field}")]
     DCharError {
         #[source]
         #[diagnostic_source]
         source: DCharError,
+        field:  String,
+    },
+    #[error("a-char validation error for {field}")]
+    ACharError {
+        #[source]
+        #[diagnostic_source]
+        source: ACharError,
         field:  String,
     },
 }
@@ -141,35 +148,49 @@ impl PrimaryVolumeDescriptor {
             bibliographic_file,
         }: PrimaryVolumeDescriptorSpec,
     ) -> Result<Self, PrimaryVolumeDescriptorError> {
-        let vol_ident_str = vol_ident.unwrap_or("");
-        let vol_ident = str_to_ascii_buf(vol_ident_str)?;
-        let vol_ident = DCharBuf::new(vol_ident, vol_ident_str.len()).map_err(|err| {
-            PrimaryVolumeDescriptorError::DCharError {
-                source: err,
-                field:  "volume identifier".to_string(),
-            }
-        })?;
-        let vol_set_ident_str = vol_set_ident.unwrap_or("");
-        let vol_set_ident = str_to_ascii_buf(vol_set_ident_str)?;
-        let vol_set_ident =
-            DCharBuf::new(vol_set_ident, vol_set_ident_str.len()).map_err(|err| {
-                PrimaryVolumeDescriptorError::DCharError {
+        fn str_to_achar<const N: usize>(
+            str: Option<&str>,
+            field: &str,
+        ) -> Result<ACharBuf<'static, [u8; N]>, PrimaryVolumeDescriptorError> {
+            let str = str.unwrap_or("");
+            let ascii = str_to_ascii_buf(str)?;
+            let achar = ACharBuf::new(ascii, str.len()).map_err(|err| {
+                PrimaryVolumeDescriptorError::ACharError {
                     source: err,
-                    field:  "volume set identifier".to_string(),
+                    field:  field.to_string(),
                 }
             })?;
-        let publisher_ident = str_to_ascii_buf(publisher_ident.unwrap_or(""))?;
-        let data_prep_ident = str_to_ascii_buf(data_prep_ident.unwrap_or(""))?;
-        let copyright_file = str_to_ascii_buf(copyright_file.unwrap_or(""))?;
-        let abstract_file = str_to_ascii_buf(abstract_file.unwrap_or(""))?;
-        let bibliographic_file = str_to_ascii_buf(bibliographic_file.unwrap_or(""))?;
+            Ok(achar)
+        }
+        fn str_to_dchar<const N: usize>(
+            str: Option<&str>,
+            field: &str,
+        ) -> Result<DCharBuf<'static, [u8; N]>, PrimaryVolumeDescriptorError> {
+            let str = str.unwrap_or("");
+            let ascii = str_to_ascii_buf(str)?;
+            let dchar = DCharBuf::new(ascii, str.len()).map_err(|err| {
+                PrimaryVolumeDescriptorError::DCharError {
+                    source: err,
+                    field:  field.to_string(),
+                }
+            })?;
+            Ok(dchar)
+        }
+
+        let vol_ident = str_to_dchar(vol_ident, "volume identifier")?;
+        let vol_set_ident = str_to_dchar(vol_set_ident, "volume set identifier")?;
+        let publisher_ident = str_to_achar(publisher_ident, "publisher identifier")?;
+        let data_prep_ident = str_to_achar(data_prep_ident, "data prep identifier")?;
+        let copyright_file = str_to_achar(copyright_file, "copyright file")?;
+        let abstract_file = str_to_achar(abstract_file, "abstract file")?;
+        let bibliographic_file = str_to_achar(bibliographic_file, "bibliographic file")?;
         Ok(Self {
             desc_type: ByteConst,
             std_ident: StandardIdentifier,
             desc_ver: ByteConst,
             _res_01: ByteConst,
-            sys_ident: PaddedConst::new(SystemIdentifier),
-            vol_ident: PaddedConst::new(vol_ident),
+            sys_ident: PaddedConst::new_with_padding(SystemIdentifier),
+            vol_ident: PaddedConst::new_with_padding(vol_ident),
             _res_02: FillConst,
             vol_space_size,
             _res_03: FillConst,
@@ -292,7 +313,7 @@ impl Encode for ApplicationIdentifier {
         writer: &mut W,
         ctx: &EncodeCtx,
     ) -> Result<(), EncodeError> {
-        PaddedConst::new::<128>("PLAYSTATION").encode(writer, ctx)
+        PaddedConst::new_with_padding::<128, b' '>("PLAYSTATION").encode(writer, ctx)
     }
 }
 
