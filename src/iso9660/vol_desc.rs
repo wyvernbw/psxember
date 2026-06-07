@@ -7,8 +7,8 @@ use miette::Diagnostic;
 use thiserror::Error;
 
 use crate::encoders::{
-    ACharBuf, ACharError, BigEndian, ByteConst, DCharBuf, DCharError, Encode, EncodeCtx,
-    EncodeError, FillConst, LittleEndian, PaddedConst, StrToAsciiError, str_to_ascii_buf,
+    ACharBuf, ACharError, BigEndian, ByteConst, DCharBuf, DCharError, Encode, EncodeError,
+    FillConst, LittleEndian, PaddedConst, StrToAsciiError, str_to_ascii_buf,
 };
 use crate::iso9660::fs::{DirectoryRecord, DirectoryRecordBuilder, Filename, SystemUse, Timestamp};
 
@@ -230,12 +230,8 @@ impl Encode for StandardIdentifier {
     fn size(&self) -> usize {
         5
     }
-    fn encode<W: ?Sized + super::DiscWrite>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
-        "CD001".encode(writer, ctx)
+    fn encode<W: ?Sized + super::DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
+        "CD001".encode(writer)
     }
 }
 
@@ -245,12 +241,8 @@ impl Encode for SystemIdentifier {
     fn size(&self) -> usize {
         "PLAYSTATION".len()
     }
-    fn encode<W: ?Sized + super::DiscWrite>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
-        "PLAYSTATION".encode(writer, ctx)
+    fn encode<W: ?Sized + super::DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
+        "PLAYSTATION".encode(writer)
     }
 }
 
@@ -268,15 +260,11 @@ pub struct PathTableBlockNumbers {
 }
 
 impl Encode for PathTableBlockNumbers {
-    fn encode<W: ?Sized + super::DiscWrite>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
-        self.pt_1.encode(writer, ctx)?;
-        self.pt_2.encode(writer, ctx)?;
-        self.pt_3.encode(writer, ctx)?;
-        self.pt_4.encode(writer, ctx)?;
+    fn encode<W: ?Sized + super::DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
+        self.pt_1.encode(writer)?;
+        self.pt_2.encode(writer)?;
+        self.pt_3.encode(writer)?;
+        self.pt_4.encode(writer)?;
         Ok(())
     }
 }
@@ -284,11 +272,7 @@ impl Encode for PathTableBlockNumbers {
 struct RootDirectoryRecord;
 
 impl Encode for RootDirectoryRecord {
-    fn encode<W: ?Sized + super::DiscWrite>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
+    fn encode<W: ?Sized + super::DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
         let record = DirectoryRecord::new(DirectoryRecordBuilder {
             filename:   Filename::from_ascii_str("")
                 .expect("error getting ascii filename for root directory record"),
@@ -298,7 +282,7 @@ impl Encode for RootDirectoryRecord {
             timestamp:  Timestamp::now(),
             flags:      FileFlags::Directory,
         });
-        record.encode(writer, ctx)
+        record.encode(writer)
     }
 }
 
@@ -308,12 +292,8 @@ impl Encode for ApplicationIdentifier {
     fn size(&self) -> usize {
         128
     }
-    fn encode<W: ?Sized + super::DiscWrite>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
-        PaddedConst::new_with_padding::<128, b' '>("PLAYSTATION").encode(writer, ctx)
+    fn encode<W: ?Sized + super::DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
+        PaddedConst::new_with_padding::<128, b' '>("PLAYSTATION").encode(writer)
     }
 }
 
@@ -323,12 +303,8 @@ impl Encode for VolumeZeroTimestamp {
     fn size(&self) -> usize {
         17
     }
-    fn encode<W: ?Sized + super::DiscWrite>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
-        PaddedConst::new::<17>("0000000000000000").encode(writer, ctx)
+    fn encode<W: ?Sized + super::DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
+        PaddedConst::new::<17>("0000000000000000").encode(writer)
     }
 }
 
@@ -338,21 +314,13 @@ impl Encode for CdXAIdentSignature {
     fn size(&self) -> usize {
         "CD-XA001".len()
     }
-    fn encode<W: ?Sized + super::DiscWrite>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
-        "CD-XA001".encode(writer, ctx)
+    fn encode<W: ?Sized + super::DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
+        "CD-XA001".encode(writer)
     }
 }
 
 impl Encode for PrimaryVolumeDescriptor {
-    fn encode<W: ?Sized + super::DiscWrite>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
+    fn encode<W: ?Sized + super::DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
         let PrimaryVolumeDescriptor {
             desc_type,
             std_ident,
@@ -390,41 +358,41 @@ impl Encode for PrimaryVolumeDescriptor {
             app_use_area_02,
             _res_05,
         } = self;
-        desc_type.encode(writer, ctx)?;
-        std_ident.encode(writer, ctx)?;
-        desc_ver.encode(writer, ctx)?;
-        _res_01.encode(writer, ctx)?;
-        sys_ident.encode(writer, ctx)?;
-        vol_ident.encode(writer, ctx)?;
-        _res_02.encode(writer, ctx)?;
-        vol_space_size.encode(writer, ctx)?;
-        _res_03.encode(writer, ctx)?;
-        vol_set_size.encode(writer, ctx)?;
-        vol_seq_number.encode(writer, ctx)?;
-        lbs_bytes.encode(writer, ctx)?;
-        pt_bytes.encode(writer, ctx)?;
-        pt_block_num.encode(writer, ctx)?;
-        root_dir_record.encode(writer, ctx)?;
-        vol_set_ident.encode(writer, ctx)?;
-        publisher_ident.encode(writer, ctx)?;
-        data_prep_ident.encode(writer, ctx)?;
-        app_ident.encode(writer, ctx)?;
-        copyright_file.encode(writer, ctx)?;
-        abstract_file.encode(writer, ctx)?;
-        bibliographic_file.encode(writer, ctx)?;
-        vol_creation_time.encode(writer, ctx)?;
-        vol_modification_time.encode(writer, ctx)?;
-        vol_expiration_time.encode(writer, ctx)?;
-        vol_effective_time.encode(writer, ctx)?;
-        file_structure_ver.encode(writer, ctx)?;
-        _res_04.encode(writer, ctx)?;
-        app_use_area_01.encode(writer, ctx)?;
-        cdxa_ident_sig.encode(writer, ctx)?;
-        cdxa_flags.encode(writer, ctx)?;
-        cdxa_startup_dir.encode(writer, ctx)?;
-        cdxa_reserved.encode(writer, ctx)?;
-        app_use_area_02.encode(writer, ctx)?;
-        _res_05.encode(writer, ctx)?;
+        desc_type.encode(writer)?;
+        std_ident.encode(writer)?;
+        desc_ver.encode(writer)?;
+        _res_01.encode(writer)?;
+        sys_ident.encode(writer)?;
+        vol_ident.encode(writer)?;
+        _res_02.encode(writer)?;
+        vol_space_size.encode(writer)?;
+        _res_03.encode(writer)?;
+        vol_set_size.encode(writer)?;
+        vol_seq_number.encode(writer)?;
+        lbs_bytes.encode(writer)?;
+        pt_bytes.encode(writer)?;
+        pt_block_num.encode(writer)?;
+        root_dir_record.encode(writer)?;
+        vol_set_ident.encode(writer)?;
+        publisher_ident.encode(writer)?;
+        data_prep_ident.encode(writer)?;
+        app_ident.encode(writer)?;
+        copyright_file.encode(writer)?;
+        abstract_file.encode(writer)?;
+        bibliographic_file.encode(writer)?;
+        vol_creation_time.encode(writer)?;
+        vol_modification_time.encode(writer)?;
+        vol_expiration_time.encode(writer)?;
+        vol_effective_time.encode(writer)?;
+        file_structure_ver.encode(writer)?;
+        _res_04.encode(writer)?;
+        app_use_area_01.encode(writer)?;
+        cdxa_ident_sig.encode(writer)?;
+        cdxa_flags.encode(writer)?;
+        cdxa_startup_dir.encode(writer)?;
+        cdxa_reserved.encode(writer)?;
+        app_use_area_02.encode(writer)?;
+        _res_05.encode(writer)?;
         Ok(())
     }
 }
@@ -444,21 +412,17 @@ pub struct VolumeDescriptorSetTerminator {
 }
 
 impl Encode for VolumeDescriptorSetTerminator {
-    fn encode<W: ?Sized + super::DiscWrite>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
+    fn encode<W: ?Sized + super::DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
         let VolumeDescriptorSetTerminator {
             desc_ty,
             standard_ident,
             terminator_ver,
             zerofill,
         } = self;
-        desc_ty.encode(writer, ctx)?;
-        standard_ident.encode(writer, ctx)?;
-        terminator_ver.encode(writer, ctx)?;
-        zerofill.encode(writer, ctx)?;
+        desc_ty.encode(writer)?;
+        standard_ident.encode(writer)?;
+        terminator_ver.encode(writer)?;
+        zerofill.encode(writer)?;
         Ok(())
     }
 }

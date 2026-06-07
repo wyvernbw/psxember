@@ -2,9 +2,7 @@ use std::io::Cursor;
 
 use bitbybit::bitfield;
 
-use crate::encoders::{
-    BigEndian, ByteConst, Encode, EncodeCtx, EncodeError, FillConst, str_to_ascii_buf,
-};
+use crate::encoders::{BigEndian, ByteConst, Encode, EncodeError, FillConst, str_to_ascii_buf};
 
 use super::DiscWrite;
 
@@ -111,11 +109,7 @@ impl Timestamp {
 }
 
 impl Encode for Timestamp {
-    fn encode<W: DiscWrite + ?Sized>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
+    fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
         let Timestamp {
             year,
             month,
@@ -125,13 +119,13 @@ impl Encode for Timestamp {
             sec,
             timezone,
         } = self;
-        year.encode(writer, ctx)?;
-        month.encode(writer, ctx)?;
-        day.encode(writer, ctx)?;
-        hour.encode(writer, ctx)?;
-        min.encode(writer, ctx)?;
-        sec.encode(writer, ctx)?;
-        timezone.encode(writer, ctx)?;
+        year.encode(writer)?;
+        month.encode(writer)?;
+        day.encode(writer)?;
+        hour.encode(writer)?;
+        min.encode(writer)?;
+        sec.encode(writer)?;
+        timezone.encode(writer)?;
         Ok(())
     }
 }
@@ -143,13 +137,9 @@ pub enum FileFlags {
 }
 
 impl Encode for FileFlags {
-    fn encode<W: DiscWrite + ?Sized>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
+    fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
         let value = *self as u8;
-        value.encode(writer, ctx)
+        value.encode(writer)
     }
 }
 
@@ -179,13 +169,9 @@ impl Filename {
 }
 
 impl Encode for Filename {
-    fn encode<W: DiscWrite + ?Sized>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
-        self.len.encode(writer, ctx)?;
-        self.name.encode(writer, ctx)?;
+    fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
+        self.len.encode(writer)?;
+        self.name.encode(writer)?;
         Ok(())
     }
 }
@@ -206,13 +192,9 @@ impl Encode for FilenamePadding {
     fn size(&self) -> usize {
         self.even as usize
     }
-    fn encode<W: ?Sized + DiscWrite>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
+    fn encode<W: ?Sized + DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
         if self.even {
-            0x0u8.encode(writer, ctx)?;
+            0x0u8.encode(writer)?;
         };
         Ok(())
     }
@@ -249,11 +231,7 @@ impl SystemUse {
 }
 
 impl SystemUse {
-    fn encode_impl<W: ?Sized + DiscWrite>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
+    fn encode_impl<W: ?Sized + DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
         let SystemUse {
             len: _,
             owner_id_group,
@@ -263,26 +241,22 @@ impl SystemUse {
             file_number,
             zerofill,
         } = self;
-        owner_id_group.encode(writer, ctx)?;
-        owner_id_user.encode(writer, ctx)?;
-        file_attr.encode(writer, ctx)?;
-        signature.encode(writer, ctx)?;
-        file_number.encode(writer, ctx)?;
-        zerofill.encode(writer, ctx)?;
+        owner_id_group.encode(writer)?;
+        owner_id_user.encode(writer)?;
+        file_attr.encode(writer)?;
+        signature.encode(writer)?;
+        file_number.encode(writer)?;
+        zerofill.encode(writer)?;
         Ok(())
     }
 }
 
 impl Encode for SystemUse {
-    fn encode<W: ?Sized + DiscWrite>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
+    fn encode<W: ?Sized + DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
         let mut temp_buf = [0u8; 14];
-        self.encode_impl(&mut Cursor::new(temp_buf.as_mut_slice()), ctx)?;
+        self.encode_impl(&mut Cursor::new(temp_buf.as_mut_slice()))?;
 
-        (&temp_buf[..self.len as usize]).encode(writer, ctx)
+        (&temp_buf[..self.len as usize]).encode(writer)
     }
 }
 
@@ -338,13 +312,9 @@ pub struct FileAttributes {
 }
 
 impl Encode for FileAttributes {
-    fn encode<W: ?Sized + DiscWrite>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
+    fn encode<W: ?Sized + DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
         let value = self.raw_value();
-        BigEndian(value).encode(writer, ctx)?;
+        BigEndian(value).encode(writer)?;
         Ok(())
     }
 }
@@ -365,21 +335,13 @@ impl Default for FileAttributes {
 struct Signature;
 
 impl Encode for Signature {
-    fn encode<W: ?Sized + DiscWrite>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
-        "XA".encode(writer, ctx)
+    fn encode<W: ?Sized + DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
+        "XA".encode(writer)
     }
 }
 
 impl Encode for DirectoryRecord {
-    fn encode<W: DiscWrite + ?Sized>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
+    fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
         let DirectoryRecord {
             len,
             ext_attr_record_len,
@@ -394,18 +356,18 @@ impl Encode for DirectoryRecord {
             filename_padding,
             system_use,
         } = self;
-        len.encode(writer, ctx)?;
-        ext_attr_record_len.encode(writer, ctx)?;
-        data_lba.encode(writer, ctx)?;
-        data_bytes_len.encode(writer, ctx)?;
-        timestamp.encode(writer, ctx)?;
-        flags.encode(writer, ctx)?;
-        file_unit_size.encode(writer, ctx)?;
-        interleave_gap_size.encode(writer, ctx)?;
-        vol_seq_num.encode(writer, ctx)?;
-        filename.encode(writer, ctx)?;
-        filename_padding.encode(writer, ctx)?;
-        system_use.encode(writer, ctx)?;
+        len.encode(writer)?;
+        ext_attr_record_len.encode(writer)?;
+        data_lba.encode(writer)?;
+        data_bytes_len.encode(writer)?;
+        timestamp.encode(writer)?;
+        flags.encode(writer)?;
+        file_unit_size.encode(writer)?;
+        interleave_gap_size.encode(writer)?;
+        vol_seq_num.encode(writer)?;
+        filename.encode(writer)?;
+        filename_padding.encode(writer)?;
+        system_use.encode(writer)?;
         Ok(())
     }
 }

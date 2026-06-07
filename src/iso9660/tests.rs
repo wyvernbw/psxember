@@ -10,10 +10,7 @@ fn write_disc() -> crate::Result<()> {
     let sys = PsxSystemArea {
         license_string: LicenseString::JP,
     };
-    let encode_ctx = EncodeCtx {
-        cursor: Mss::new(0.into(), 0.into(), 0.into()),
-    };
-    sys.encode(&mut f, &encode_ctx)?;
+    sys.encode(&mut f)?;
 
     let desc = PrimaryVolumeDescriptor::new(PrimaryVolumeDescriptorSpec {
         vol_ident:          Some("MY_VOLUME"),
@@ -35,6 +32,6 @@ fn write_disc() -> crate::Result<()> {
         abstract_file:      None,
         bibliographic_file: None,
     })?;
-    desc.encode(&mut f, &encode_ctx)?;
+    desc.encode(&mut f)?;
     Ok(())
 }

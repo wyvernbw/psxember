@@ -17,19 +17,11 @@ pub trait Encode: Sized {
     fn size(&self) -> usize {
         std::mem::size_of::<Self>()
     }
-    fn encode<W: DiscWrite + ?Sized>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError>;
+    fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError>;
 }
 
 impl Encode for u8 {
-    fn encode<W: DiscWrite + ?Sized>(
-        &self,
-        writer: &mut W,
-        _: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
+    fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
         writer.write_all(&[*self]).into_diagnostic()?;
         Ok(())
     }
@@ -38,11 +30,7 @@ impl Encode for u8 {
 macro_rules! impl_encode_primitive {
     ($type:ty) => {
         impl Encode for $type {
-            fn encode<W: DiscWrite + ?Sized>(
-                &self,
-                writer: &mut W,
-                _: &EncodeCtx,
-            ) -> Result<(), EncodeError> {
+            fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
                 writer.write_all(&(*self).to_le_bytes()).into_diagnostic()?;
                 Ok(())
             }
@@ -56,35 +44,23 @@ impl_encode_primitive!(u64);
 impl_encode_primitive!(usize);
 
 impl Encode for &str {
-    fn encode<W: DiscWrite + ?Sized>(
-        &self,
-        writer: &mut W,
-        _: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
+    fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
         writer.write_all(self.as_bytes()).into_diagnostic()?;
         Ok(())
     }
 }
 
 impl<T: Encode, const N: usize> Encode for [T; N] {
-    fn encode<W: DiscWrite + ?Sized>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
+    fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
         for value in self {
-            value.encode(writer, ctx)?;
+            value.encode(writer)?;
         }
         Ok(())
     }
 }
 
 impl Encode for &[u8] {
-    fn encode<W: DiscWrite + ?Sized>(
-        &self,
-        writer: &mut W,
-        _: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
+    fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
         writer.write_all(self).into_diagnostic()
     }
 }
@@ -103,11 +79,7 @@ macro_rules! impl_endian_wrappers {
             }
         }
         impl Encode for $type {
-            fn encode<W: DiscWrite + ?Sized>(
-                &self,
-                writer: &mut W,
-                _: &EncodeCtx,
-            ) -> Result<(), EncodeError> {
+            fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
                 writer.write_all(&(*self).to_bytes()).into_diagnostic()?;
                 Ok(())
             }
@@ -159,11 +131,7 @@ impl<T: Encode, const N: usize, const PAD: u8> Encode for PaddedConst<T, N, PAD>
     fn size(&self) -> usize {
         N
     }
-    fn encode<W: DiscWrite + ?Sized>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
+    fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
         let block_size = self.size();
         assert!(
             self.data.size() <= block_size,
@@ -174,8 +142,8 @@ impl<T: Encode, const N: usize, const PAD: u8> Encode for PaddedConst<T, N, PAD>
         );
         let padding = block_size.saturating_sub(self.data.size());
         let fill = Fill::new(padding, &[PAD]);
-        self.data.encode(writer, ctx)?;
-        fill.encode(writer, ctx)?;
+        self.data.encode(writer)?;
+        fill.encode(writer)?;
         Ok(())
     }
 }
@@ -206,11 +174,7 @@ impl Encode for Fill {
     fn size(&self) -> usize {
         self.total_bytes
     }
-    fn encode<W: DiscWrite + ?Sized>(
-        &self,
-        writer: &mut W,
-        _ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
+    fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
         let mut written = 0;
         while written < self.total_bytes {
             let remaining = self.total_bytes - written;
@@ -245,12 +209,8 @@ impl<const VALUE: u8, const N: usize> Encode for FillConst<VALUE, N> {
     fn size(&self) -> usize {
         N
     }
-    fn encode<W: DiscWrite + ?Sized>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
-        Fill::new(N, &[VALUE]).encode(writer, ctx)
+    fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
+        Fill::new(N, &[VALUE]).encode(writer)
     }
 }
 
@@ -261,12 +221,8 @@ impl<const VALUE: u8> Encode for ByteConst<VALUE> {
     fn size(&self) -> usize {
         1
     }
-    fn encode<W: DiscWrite + ?Sized>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
-        FillConst::<VALUE, 1>.encode(writer, ctx)
+    fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
+        FillConst::<VALUE, 1>.encode(writer)
     }
 }
 
@@ -353,16 +309,12 @@ pub trait CharBuf<'a, B: Buffer<'a>>: Sized {
         Ok(Self::from_parts(bytes, len))
     }
 
-    fn encode_chars<W: DiscWrite + ?Sized>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
+    fn encode_chars<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
         let bytes = &self.bytes()[..self.len()];
         writer.write_all(bytes).into_diagnostic()?;
         let remaining = self.bytes().len().saturating_sub(self.len());
         // pad remaining dchar buffer with spaces
-        Fill::new(remaining, b" ").encode(writer, ctx)?;
+        Fill::new(remaining, b" ").encode(writer)?;
 
         Ok(())
     }
@@ -441,12 +393,8 @@ impl<'a, B: Buffer<'a>> CharBuf<'a, B> for DCharBuf<'a, B> {
 }
 
 impl<'a, B: Buffer<'a>> Encode for DCharBuf<'a, B> {
-    fn encode<W: DiscWrite + ?Sized>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
-        self.encode_chars(writer, ctx)
+    fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
+        self.encode_chars(writer)
     }
 }
 
@@ -509,12 +457,8 @@ impl<'a, B: Buffer<'a>> CharBuf<'a, B> for ACharBuf<'a, B> {
 }
 
 impl<'a, B: Buffer<'a>> Encode for ACharBuf<'a, B> {
-    fn encode<W: DiscWrite + ?Sized>(
-        &self,
-        writer: &mut W,
-        ctx: &EncodeCtx,
-    ) -> Result<(), EncodeError> {
-        self.encode_chars(writer, ctx)
+    fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
+        self.encode_chars(writer)
     }
 }
 
