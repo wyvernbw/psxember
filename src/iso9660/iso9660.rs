@@ -8,7 +8,7 @@ use std::marker::{Destruct, PhantomData};
 
 use arbitrary_int::prelude::*;
 use bitbybit::{bitfield, *};
-use snafu::{ResultExt, whatever};
+use miette::IntoDiagnostic;
 
 use crate::encoders::{Encode, EncodeCtx, EncodeError, Fill};
 
@@ -27,9 +27,7 @@ pub struct Lba(u64);
 
 pub trait DiscWrite: Write + Seek {
     fn lba(&mut self) -> crate::Result<Lba> {
-        let pos = self
-            .stream_position()
-            .with_whatever_context(|_| format!("failed to get stream position"))?;
+        let pos = self.stream_position().into_diagnostic()?;
         let lba = pos / SECTOR_RAW_SIZE as u64;
         Ok(Lba(lba))
     }

@@ -280,16 +280,9 @@ impl Encode for SystemUse {
         ctx: &EncodeCtx,
     ) -> Result<(), EncodeError> {
         let mut temp_buf = [0u8; 14];
+        self.encode_impl(&mut Cursor::new(temp_buf.as_mut_slice()), ctx)?;
 
-        {
-            let temp_slice = temp_buf
-                .get_mut(0..self.len as usize)
-                .expect("psx system use area should be at most 14 bytes");
-            let mut temp_slice = Cursor::new(temp_slice);
-            self.encode_impl(&mut temp_slice, ctx)?;
-        }
-
-        temp_buf.encode(writer, ctx)
+        (&temp_buf[..self.len as usize]).encode(writer, ctx)
     }
 }
 

@@ -3,7 +3,8 @@
 //! module for the primary volume descriptor (sector 16) and the descriptor set
 //! terminator (sector 17).
 
-use snafu::Snafu;
+use miette::Diagnostic;
+use thiserror::Error;
 
 use crate::encoders::{
     BigEndian, ByteConst, Encode, EncodeCtx, EncodeError, FillConst, LittleEndian, PaddedConst,
@@ -93,22 +94,10 @@ pub struct PrimaryVolumeDescriptor {
     _res_05:               FillConst<0x0, 653>,
 }
 
-#[derive(Debug, Clone, Snafu)]
+#[derive(Debug, Clone, Error, Diagnostic)]
 pub enum PrimaryVolumeDescriptorError {
-    #[snafu(display("volume identifier ascii error: {source}"))]
-    VolumeIdentifierAsciiErr { source: StrToAsciiError },
-    #[snafu(display("publisher identifier ascii error: {source}"))]
-    PublisherIdentifierAsciiErr { source: StrToAsciiError },
-    #[snafu(display("vol set identifier ascii error: {source}"))]
-    VolumeSetIdentifierAsciiErr { source: StrToAsciiError },
-    #[snafu(display("data prep identifier ascii error: {source}"))]
-    DataPrepIdentifierAsciiErr { source: StrToAsciiError },
-    #[snafu(display("copyright file ascii error: {source}"))]
-    CopyrightFileAsciiErr { source: StrToAsciiError },
-    #[snafu(display("abstract file ascii error: {source}"))]
-    AbstractFileAsciiErr { source: StrToAsciiError },
-    #[snafu(display("bibliographic file ascii error: {source}"))]
-    BibliographicFileAsciiErr { source: StrToAsciiError },
+    #[error(transparent)]
+    AsciiError(#[from] StrToAsciiError),
 }
 
 pub struct PrimaryVolumeDescriptorSpec<'a> {
@@ -145,25 +134,13 @@ impl PrimaryVolumeDescriptor {
             bibliographic_file,
         }: PrimaryVolumeDescriptorSpec,
     ) -> Result<Self, PrimaryVolumeDescriptorError> {
-        let vol_ident = str_to_ascii_buf(vol_ident.unwrap_or(""))
-            .map_err(|source| PrimaryVolumeDescriptorError::VolumeIdentifierAsciiErr { source })?;
-        let vol_set_ident = str_to_ascii_buf(vol_set_ident.unwrap_or("")).map_err(|source| {
-            PrimaryVolumeDescriptorError::VolumeSetIdentifierAsciiErr { source }
-        })?;
-        let publisher_ident =
-            str_to_ascii_buf(publisher_ident.unwrap_or("")).map_err(|source| {
-                PrimaryVolumeDescriptorError::PublisherIdentifierAsciiErr { source }
-            })?;
-        let data_prep_ident =
-            str_to_ascii_buf(data_prep_ident.unwrap_or("")).map_err(|source| {
-                PrimaryVolumeDescriptorError::DataPrepIdentifierAsciiErr { source }
-            })?;
-        let copyright_file = str_to_ascii_buf(copyright_file.unwrap_or(""))
-            .map_err(|source| PrimaryVolumeDescriptorError::CopyrightFileAsciiErr { source })?;
-        let abstract_file = str_to_ascii_buf(abstract_file.unwrap_or(""))
-            .map_err(|source| PrimaryVolumeDescriptorError::AbstractFileAsciiErr { source })?;
-        let bibliographic_file = str_to_ascii_buf(bibliographic_file.unwrap_or(""))
-            .map_err(|source| PrimaryVolumeDescriptorError::BibliographicFileAsciiErr { source })?;
+        let vol_ident = str_to_ascii_buf(vol_ident.unwrap_or(""))?;
+        let vol_set_ident = str_to_ascii_buf(vol_set_ident.unwrap_or(""))?;
+        let publisher_ident = str_to_ascii_buf(publisher_ident.unwrap_or(""))?;
+        let data_prep_ident = str_to_ascii_buf(data_prep_ident.unwrap_or(""))?;
+        let copyright_file = str_to_ascii_buf(copyright_file.unwrap_or(""))?;
+        let abstract_file = str_to_ascii_buf(abstract_file.unwrap_or(""))?;
+        let bibliographic_file = str_to_ascii_buf(bibliographic_file.unwrap_or(""))?;
         Ok(Self {
             desc_type: ByteConst,
             std_ident: StandardIdentifier,

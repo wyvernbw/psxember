@@ -1,18 +1,12 @@
-use snafu::{Snafu, Whatever};
+use miette::{IntoDiagnostic, LabeledSpan, miette};
+use thiserror::Error;
 
 use crate::iso9660::{Bcd, DiscWrite, Mss};
 pub struct EncodeCtx {
     pub cursor: Mss<Bcd>,
 }
 
-#[derive(Debug, Snafu)]
-pub enum EncodeError {
-    #[snafu(transparent)]
-    IOError { source: std::io::Error },
-
-    #[snafu(transparent)]
-    Transparent { source: Whatever },
-}
+pub type EncodeError = miette::Report;
 
 pub trait Encode: Sized {
     fn size(&self) -> usize {
@@ -31,7 +25,7 @@ impl Encode for u8 {
         writer: &mut W,
         _: &EncodeCtx,
     ) -> Result<(), EncodeError> {
-        writer.write_all(&[*self])?;
+        writer.write_all(&[*self]).into_diagnostic()?;
         Ok(())
     }
 }
@@ -44,7 +38,7 @@ macro_rules! impl_encode_primitive {
                 writer: &mut W,
                 _: &EncodeCtx,
             ) -> Result<(), EncodeError> {
-                writer.write_all(&(*self).to_le_bytes())?;
+                writer.write_all(&(*self).to_le_bytes()).into_diagnostic()?;
                 Ok(())
             }
         }
@@ -62,7 +56,7 @@ impl Encode for &str {
         writer: &mut W,
         _: &EncodeCtx,
     ) -> Result<(), EncodeError> {
-        writer.write_all(self.as_bytes())?;
+        writer.write_all(self.as_bytes()).into_diagnostic()?;
         Ok(())
     }
 }
@@ -77,6 +71,16 @@ impl<T: Encode, const N: usize> Encode for [T; N] {
             value.encode(writer, ctx)?;
         }
         Ok(())
+    }
+}
+
+impl Encode for &[u8] {
+    fn encode<W: DiscWrite + ?Sized>(
+        &self,
+        writer: &mut W,
+        _: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
+        writer.write_all(self).into_diagnostic()
     }
 }
 
@@ -99,7 +103,7 @@ macro_rules! impl_endian_wrappers {
                 writer: &mut W,
                 _: &EncodeCtx,
             ) -> Result<(), EncodeError> {
-                writer.write_all(&(*self).to_bytes())?;
+                writer.write_all(&(*self).to_bytes()).into_diagnostic()?;
                 Ok(())
             }
         }
@@ -198,7 +202,23 @@ impl Encode for Fill {
         while written < self.total_bytes {
             let remaining = self.total_bytes - written;
             let chunk = &self.pattern[..self.pattern.len().min(remaining)];
-            writer.write_all(chunk)?;
+            writer.write_all(chunk).map_err(|err| {
+                miette!(
+                    code = err
+                        .raw_os_error()
+                        .map(|code| code.to_string())
+                        .unwrap_or("unknown code".to_string()),
+                    labels = [LabeledSpan::at_offset(
+                        0,
+                        format!("chunk data ({} bytes)", chunk.len())
+                    )],
+                    "failed to write fill data ({} total bytes): {} - {}",
+                    self.total_bytes,
+                    err,
+                    err.kind()
+                )
+                .with_source_code(format!("{chunk:?}"))
+            })?;
             written += chunk.len();
         }
         Ok(())
@@ -237,14 +257,16 @@ impl<const VALUE: u8> Encode for ByteConst<VALUE> {
     }
 }
 
-#[derive(Debug, Clone, Copy, Snafu)]
+#[derive(Debug, Clone, Error)]
 pub enum StrToAsciiError {
-    #[snafu(display("string is not ascii"))]
-    NotAscii,
+    #[error("string is not ascii: {0}")]
+    NotAscii(String),
 }
 
 pub fn str_to_ascii_buf<const N: usize>(str: &str) -> Result<[u8; N], StrToAsciiError> {
-    let str = str.as_ascii().ok_or(StrToAsciiError::NotAscii)?;
+    let str = str
+        .as_ascii()
+        .ok_or_else(|| StrToAsciiError::NotAscii(str.to_owned()))?;
     let mut buf = [0u8; N];
     let len = N.min(str.len());
     buf[..len].copy_from_slice(&str.as_bytes()[..len]);

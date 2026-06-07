@@ -5,7 +5,6 @@ use crate::encoders::Encode;
 use crate::iso9660::vol_desc::{PrimaryVolumeDescriptor, PrimaryVolumeDescriptorSpec};
 
 #[test]
-#[snafu::report]
 fn write_disc() -> crate::Result<()> {
     let mut f = File::create("./test-file.iso").unwrap();
     let sys = PsxSystemArea {
@@ -14,10 +13,7 @@ fn write_disc() -> crate::Result<()> {
     let encode_ctx = EncodeCtx {
         cursor: Mss::new(0.into(), 0.into(), 0.into()),
     };
-    sys.encode(&mut f, &encode_ctx).unwrap();
-    println!("file: {:?}", f);
-    // after each encode:
-    println!("pos after sys: {}", f.stream_position().unwrap());
+    sys.encode(&mut f, &encode_ctx)?;
 
     let desc = PrimaryVolumeDescriptor::new(PrimaryVolumeDescriptorSpec {
         vol_ident:          Some("my volume"),
@@ -38,15 +34,7 @@ fn write_disc() -> crate::Result<()> {
         copyright_file:     Some("copyright.txt"),
         abstract_file:      None,
         bibliographic_file: None,
-    })
-    .unwrap();
-    desc.encode(&mut f, &encode_ctx)
-        .whatever_context("failed to encode primary volume descriptor")?;
-    println!("file: {:?}", f);
-    // after each encode:
-    println!(
-        "pos after primary vol desc: {}",
-        f.stream_position().unwrap()
-    );
+    })?;
+    desc.encode(&mut f, &encode_ctx)?;
     Ok(())
 }

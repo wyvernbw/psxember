@@ -4,13 +4,11 @@
 #![feature(const_array)]
 #![feature(ascii_char)]
 
-use snafu::Whatever;
-
 pub mod encoders;
 #[path = "./iso9660/iso9660.rs"]
 pub mod iso9660;
 
-pub type Result<T> = core::result::Result<T, Whatever>;
+pub type Result<T> = miette::Result<T>;
 
 fn main() {
     println!("Hello, world!");
