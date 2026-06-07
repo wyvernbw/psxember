@@ -157,7 +157,7 @@ checksum = "6b947ae49db0d222b1dbc6b113ce7248a3fc3a6ca21b696717bfc000ba4484d8"
 [[package]]
 name = "miette"
 version = "7.6.0"
-source = "git+https://github.com/wyvernbw/miette?branch=wyvernbw%2Fbacktrace-support#c6cafab4bb49f3e1a8cfcdd80d2edae0ea18b2e8"
+source = "git+https://github.com/wyvernbw/miette?branch=wyvernbw%2Fbacktrace-support#611d222ba5faab8562889813e2b2680c07459db6"
 dependencies = [
  "backtrace",
  "backtrace-ext",
@@ -175,7 +175,7 @@ dependencies = [
 [[package]]
 name = "miette-derive"
 version = "7.6.0"
-source = "git+https://github.com/wyvernbw/miette?branch=wyvernbw%2Fbacktrace-support#c6cafab4bb49f3e1a8cfcdd80d2edae0ea18b2e8"
+source = "git+https://github.com/wyvernbw/miette?branch=wyvernbw%2Fbacktrace-support#611d222ba5faab8562889813e2b2680c07459db6"
 dependencies = [
  "proc-macro2",
  "quote",

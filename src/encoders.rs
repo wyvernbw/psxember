@@ -17,7 +17,8 @@ pub struct EncodeCtx {
 pub enum EncodeError {
     #[error(transparent)]
     IO(#[from] std::io::Error),
-    Report(miette::Report),
+    #[diagnostic(transparent)]
+    Report(#[diagnostic_source] miette::Report),
 }
 
 impl From<miette::Report> for EncodeError {
@@ -37,6 +38,15 @@ impl Encode for u8 {
     fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
         writer.write_all(&[*self]).into_diagnostic()?;
         Ok(())
+    }
+}
+
+impl<T> Encode for &T
+where
+    T: Encode,
+{
+    fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
+        T::encode(self, writer)
     }
 }
 

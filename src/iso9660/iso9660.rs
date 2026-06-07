@@ -3,14 +3,15 @@ pub mod fs;
 mod tests;
 pub mod vol_desc;
 
-use std::io::{self, Cursor, Seek, Write};
-use std::marker::{Destruct, PhantomData};
+use std::io::{Cursor, Seek, Write};
+use std::marker::Destruct;
 
 use arbitrary_int::prelude::*;
 use bitbybit::{bitfield, *};
-use miette::IntoDiagnostic;
+use miette::{Context, IntoDiagnostic, miette};
 
 use crate::encoders::{Encode, EncodeError, Fill};
+use crate::iso9660::vol_desc::PrimaryVolumeDescriptor;
 
 #[bitfield(u8, debug)]
 pub struct Bcd {
@@ -68,7 +69,12 @@ impl From<Bcd> for u8 {
 
 impl From<u8> for Bcd {
     fn from(value: u8) -> Self {
-        Self::new_with_raw_value(value)
+        let digit_01 = value % 10;
+        let digit_02 = value / 10 % 10;
+        Bcd::builder()
+            .with_digit_01(digit_01.as_())
+            .with_digit_02(digit_02.as_())
+            .build()
     }
 }
 
@@ -308,6 +314,7 @@ struct PsxSystemArea {
 ///   041h 1983  Empty (JP)    (filled by repeating pattern 62x30h,1x0Ah, 1x30h)
 ///   046h 1978  Empty (EU/US) (filled by 00h-bytes)
 /// ```
+#[derive(Debug, Clone, Copy)]
 enum LicenseString {
     EU,
     JP,
@@ -374,69 +381,6 @@ impl Encode for Subheader {
     }
 }
 
-struct DataBlock<'a, T: Encode, F> {
-    data: &'a T,
-    _ty:  PhantomData<F>,
-}
-
-impl<T: Encode, F> DataBlock<'_, T, F> {
-    fn encode_impl<W: ?Sized + DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError>
-    where
-        Self: Encode,
-    {
-        let block_size = self.size();
-        assert!(
-            self.data.size() <= block_size,
-            "data ({}) is {} bytes, greater than data block size {}",
-            std::any::type_name::<T>(),
-            self.data.size(),
-            block_size
-        );
-        let padding = block_size.saturating_sub(self.data.size());
-        let fill = Fill::zero(padding);
-        self.data.encode(writer)?;
-        fill.encode(writer)?;
-        Ok(())
-    }
-}
-
-impl<'a, T: Encode> DataBlock<'a, T, Form1Sector<T>> {
-    #[must_use]
-    fn new_form1(data: &'a T) -> Self {
-        Self {
-            data,
-            _ty: PhantomData,
-        }
-    }
-}
-impl<'a, T: Encode> DataBlock<'a, T, Form2Sector<T>> {
-    #[must_use]
-    fn new_form2(data: &'a T) -> Self {
-        Self {
-            data,
-            _ty: PhantomData,
-        }
-    }
-}
-
-impl<T: Encode> Encode for DataBlock<'_, T, Form1Sector<T>> {
-    fn size(&self) -> usize {
-        0x800
-    }
-    fn encode<W: ?Sized + DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
-        self.encode_impl(writer)
-    }
-}
-
-impl<T: Encode> Encode for DataBlock<'_, T, Form2Sector<T>> {
-    fn size(&self) -> usize {
-        0x914
-    }
-    fn encode<W: ?Sized + DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
-        self.encode_impl(writer)
-    }
-}
-
 static EDC_TABLE: [u32; 256] = const {
     //  for i=0 to FFh
     //    x=i, for j=0 to 7, x=x shr 1, if carry then x=x xor D8018001h
@@ -500,7 +444,7 @@ impl<T: Encode> Encode for Form1Sector<T> {
         self.subheader.encode(&mut temp_buf)?;
         self.subheader.encode(&mut temp_buf)?; // subheader copy
 
-        match DataBlock::new_form1(&self.data).encode(&mut temp_buf) {
+        match self.data.encode(&mut temp_buf) {
             Ok(_) => {}
             Err(EncodeError::IO(err)) if err.kind() == std::io::ErrorKind::WriteZero => {
                 tracing::warn!(
@@ -596,7 +540,7 @@ impl<T: Encode> Encode for Form2Sector<T> {
         self.subheader.encode(&mut temp_buf)?;
         self.subheader.encode(&mut temp_buf)?; // subheader copy
 
-        match DataBlock::new_form2(&self.data).encode(&mut temp_buf) {
+        match self.data.encode(&mut temp_buf) {
             Ok(_) => {}
             Err(EncodeError::IO(err)) if err.kind() == std::io::ErrorKind::WriteZero => {
                 tracing::warn!(
@@ -618,14 +562,18 @@ impl<T: Encode> Encode for Form2Sector<T> {
 
 impl Encode for LicenseString {
     fn encode<W: ?Sized + DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
-        "          Licensed  by          ".encode(writer)?;
+        static LICENSED_BY: &str = "          Licensed  by          ";
+
+        LICENSED_BY.encode(writer)?;
+
         match self {
             LicenseString::EU => {
                 "Sony Computer Entertainment Euro".encode(writer)?;
                 " pe   ".encode(writer)?;
             }
             LicenseString::JP => {
-                "Sony Computer Entertainment Inc.".encode(writer)?;
+                static LICENSE_JP: &str = "Sony Computer Entertainment Inc.";
+                LICENSE_JP.encode(writer)?;
                 0x0Au8.encode(writer)?;
             }
             LicenseString::US => {
@@ -635,7 +583,9 @@ impl Encode for LicenseString {
         };
         match self {
             LicenseString::EU | LicenseString::US => {
-                Fill::zero(1978).encode(writer)?;
+                Fill::zero(1978)
+                    .encode(writer)
+                    .wrap_err_with(|| miette!("error zero filling {self:?}"))?;
             }
             LicenseString::JP => {
                 const fn value(idx: usize) -> u8 {
@@ -648,7 +598,9 @@ impl Encode for LicenseString {
                 }
                 static FILL: &[u8] = &core::array::from_fn::<u8, 64, _>(value);
 
-                Fill::new(1983, FILL).encode(writer)?;
+                Fill::new(1983, FILL)
+                    .encode(writer)
+                    .wrap_err_with(|| miette!("error zero filling {self:?}"))?;
             }
         }
         Ok(())
@@ -667,10 +619,25 @@ impl Encode for PsxSystemArea {
             );
             sector.encode(writer)?;
         }
-        self.license_string.encode(writer)?;
+
+        let license_string = Form1Sector::new(
+            self.license_string,
+            writer.address()?,
+            Submode::new_with_raw_value(0),
+        );
+        license_string.encode(writer)?;
 
         // logo area
-        Fill::new(0x930 * 0x7, &[0xff]).encode(writer)?;
+        for _ in 5..=11 {
+            let bytes_in_sector = 0x800;
+            let address = writer.address()?;
+            let sector = Form1Sector::new(
+                Fill::new(bytes_in_sector, &[0xff]),
+                address,
+                Submode::new_with_raw_value(0),
+            );
+            sector.encode(writer)?;
+        }
 
         for _ in 12..=15 {
             let bytes_in_sector = 0x914;
@@ -684,4 +651,13 @@ impl Encode for PsxSystemArea {
 
         Ok(())
     }
+}
+
+fn write_primary_volumde_descriptor<W: DiscWrite>(
+    w: &mut W,
+    desc: &PrimaryVolumeDescriptor,
+) -> Result<(), EncodeError> {
+    let sector = Form2Sector::new(desc, w.address()?, Submode::new_with_raw_value(0));
+    sector.encode(w)?;
+    Ok(())
 }

@@ -6,7 +6,9 @@ use crate::iso9660::vol_desc::{PrimaryVolumeDescriptor, PrimaryVolumeDescriptorS
 
 #[test]
 fn write_disc() -> crate::Result<()> {
-    let mut f = File::create("./test-file.iso").unwrap();
+    miette::set_panic_hook();
+
+    let mut f = File::create("./test-file.iso").into_diagnostic()?;
     let sys = PsxSystemArea {
         license_string: LicenseString::JP,
     };
@@ -32,6 +34,6 @@ fn write_disc() -> crate::Result<()> {
         abstract_file:      None,
         bibliographic_file: None,
     })?;
-    desc.encode(&mut f)?;
+    write_primary_volumde_descriptor(&mut f, &desc)?;
     Ok(())
 }
