@@ -11,7 +11,20 @@ pub struct EncodeCtx {
     pub cursor: Mss<Bcd>,
 }
 
-pub type EncodeError = miette::Report;
+// pub type EncodeError = miette::Report;
+#[derive(Debug, Error, Diagnostic)]
+#[error("encode error: {0}")]
+pub enum EncodeError {
+    #[error(transparent)]
+    IO(#[from] std::io::Error),
+    Report(miette::Report),
+}
+
+impl From<miette::Report> for EncodeError {
+    fn from(value: miette::Report) -> Self {
+        Self::Report(value)
+    }
+}
 
 pub trait Encode: Sized {
     fn size(&self) -> usize {
@@ -61,7 +74,14 @@ impl<T: Encode, const N: usize> Encode for [T; N] {
 
 impl Encode for &[u8] {
     fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
-        writer.write_all(self).into_diagnostic()
+        writer.write_all(self).into_diagnostic()?;
+        Ok(())
+    }
+}
+
+impl Encode for &mut [u8] {
+    fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
+        self.as_ref().encode(writer)
     }
 }
 

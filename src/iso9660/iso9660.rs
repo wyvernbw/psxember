@@ -424,24 +424,95 @@ impl<T: Encode> Encode for DataBlock<'_, T, Form1Sector<T>> {
 
 impl<T: Encode> Encode for DataBlock<'_, T, Form2Sector<T>> {
     fn size(&self) -> usize {
-        0x924
+        0x914
     }
     fn encode<W: ?Sized + DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
         self.encode_impl(writer)
     }
 }
 
+static EDC_TABLE: [u32; 256] = const {
+    //  for i=0 to FFh
+    //    x=i, for j=0 to 7, x=x shr 1, if carry then x=x xor D8018001h
+    //    edc_table[i]=x
+    //  GF8_LOG[00h]=00h, GF8_ILOG[FFh]=00h, x=01h
+    //  for i=00h to FEh
+    //    GF8_LOG[x]=i, GF8_ILOG[i]=x
+    //    x=x SHL 1, if carry8bit then x=x xor 1dh
+    //  for j=0 to 42
+    //    xx=GF8_ILOG[44-j],  yy=subfunc(xx xor 1,19h)
+    //    xx=subfunc(xx,01h), xx=subfunc(xx xor 1,18h)
+    //    xx=GF8_LOG[xx], yy = GF8_LOG[yy]
+    //    GF8_PRODUCT[j,0]=0000h
+    //    for i=01h to FFh
+    //      x=xx+GF8_LOG[i], if x>=255 then x=x-255
+    //      y=yy+GF8_LOG[i], if y>=255 then y=y-255
+    //      GF8_PRODUCT[j,i]=GF8_ILOG[x]+(GF8_ILOG[y] shl 8)
+
+    let mut edc_table = [0u32; 256];
+    let mut i = 0;
+    while i < 256 {
+        let mut x = i as u32;
+        let mut j = 0;
+        while j < 8 {
+            let carry = (x & 1) == 0;
+            x >>= 1;
+            if carry {
+                x ^= 0xd8018001
+            }
+            j += 1;
+        }
+        edc_table[i] = x;
+        i += 1
+    }
+
+    edc_table
+};
+
+fn edc_checksum(bytes: &[u8]) -> u32 {
+    // x=00000000h
+    // for i=0 to len-1
+    //   x=x xor byte[addr+i], x=(x shr 8) xor edc_table[x and FFh]
+    // word[addr+len]=x  ;append EDC value (little endian)
+    let mut edc = 0u32;
+    for byte in bytes.iter() {
+        edc ^= *byte as u32;
+        edc <<= 8;
+        edc ^= EDC_TABLE[(edc & 0xff) as usize];
+    }
+
+    edc
+}
+
 impl<T: Encode> Encode for Form1Sector<T> {
     fn encode<W: ?Sized + DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
         self.sync.encode(writer)?;
         self.header.encode(writer)?;
-        self.subheader.encode(writer)?;
-        self.subheader.encode(writer)?; // subheader copy
 
-        DataBlock::new_form1(&self.data).encode(writer)?;
+        let mut temp_buf = [0u8; 0x800 + 0x4 + 0x4];
+        let mut temp_buf = Cursor::new(temp_buf.as_mut_slice());
+        self.subheader.encode(&mut temp_buf)?;
+        self.subheader.encode(&mut temp_buf)?; // subheader copy
 
-        self.edc.encode(writer)?;
-        self.ecc.encode(writer)?;
+        match DataBlock::new_form1(&self.data).encode(&mut temp_buf) {
+            Ok(_) => {}
+            Err(EncodeError::IO(err)) if err.kind() == std::io::ErrorKind::WriteZero => {
+                tracing::warn!(
+                    "data in form1 sector was truncated to 0x800 bytes (possible data loss)"
+                );
+            }
+            err => return err,
+        };
+
+        let temp_buf = temp_buf.into_inner();
+        // commit data from temporary buffer
+        temp_buf.encode(writer)?;
+
+        let edc = edc_checksum(temp_buf);
+        edc.encode(writer)?;
+
+        // self.ecc.encode(writer)?;
+        Fill::zero(0x114).encode(writer)?;
         Ok(())
     }
 }
@@ -459,8 +530,6 @@ impl<T: Encode> Form1Sector<T> {
             mss,
             mode: HeaderMode::Mode2,
         };
-        let mut temp_buf = [0u8; 0x800];
-        data.encode(&mut Cursor::new(temp_buf.as_mut_slice()));
 
         Self {
             sync: SyncHeader,
@@ -515,13 +584,28 @@ impl<T: Encode> Encode for Form2Sector<T> {
     fn encode<W: ?Sized + DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
         self.sync.encode(writer)?;
         self.header.encode(writer)?;
-        self.subheader.encode(writer)?;
-        self.subheader.encode(writer)?; // subheader copy
 
-        let data = DataBlock::new_form2(&self.data);
-        data.encode(writer)?;
+        let mut temp_buf = [0u8; 0x914 + 0x4 + 0x4];
+        let mut temp_buf = Cursor::new(temp_buf.as_mut_slice());
+        self.subheader.encode(&mut temp_buf)?;
+        self.subheader.encode(&mut temp_buf)?; // subheader copy
 
-        self.edc.encode(writer)?;
+        match DataBlock::new_form2(&self.data).encode(&mut temp_buf) {
+            Ok(_) => {}
+            Err(EncodeError::IO(err)) if err.kind() == std::io::ErrorKind::WriteZero => {
+                tracing::warn!(
+                    "data in form1 sector was truncated to 0x800 bytes (possible data loss)"
+                );
+            }
+            err => return err,
+        };
+
+        let temp_buf = temp_buf.into_inner();
+        // commit data from temporary buffer
+        temp_buf.encode(writer)?;
+
+        let edc = edc_checksum(temp_buf);
+        edc.encode(writer)?;
         Ok(())
     }
 }
@@ -583,7 +667,7 @@ impl Encode for PsxSystemArea {
         Fill::new(0x930 * 0x7, &[0xff]).encode(writer)?;
 
         for _ in 12..=15 {
-            let bytes_in_sector = 0x924;
+            let bytes_in_sector = 0x914;
             let sector = Form2Sector::new(
                 Fill::zero(bytes_in_sector),
                 writer.address()?,
