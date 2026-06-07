@@ -193,7 +193,7 @@ struct Subheader {
     file:    FileNumber,
     channel: ChannelNumber,
     submode: Submode,
-    cinfo:   Todo,
+    cinfo:   CodingInfo,
 }
 
 /// # 1st Subheader byte - File Number (FN)
@@ -260,13 +260,19 @@ pub struct Submode {
 ///   6   Emphasis        (0=Normal/Off, 1=Emphasis)
 ///   7   Reserved        (0)
 /// ```
-#[bitfield(u8)]
+#[bitfield(u8, default = 0x00)]
 struct CodingInfo {
     #[bits(0..=1, rw)]
     mono_stereo: u2,
     #[bits(2..=3)]
     sample_rate: XAADPCMSampleRate,
     // TODO: the rest of the fields
+}
+
+impl Encode for CodingInfo {
+    fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
+        self.raw_value().encode(writer)
+    }
 }
 
 #[bitenum(u2, exhaustive = true)]
@@ -524,7 +530,7 @@ impl<T: Encode> Form1Sector<T> {
             file: FileNumber(0),
             channel: ChannelNumber(0),
             submode,
-            cinfo: (),
+            cinfo: CodingInfo::default(),
         };
         let header = Header {
             mss,
@@ -555,7 +561,7 @@ impl<T> Form2Sector<T> {
                 file: FileNumber(0),
                 channel: ChannelNumber(0),
                 submode,
-                cinfo: (),
+                cinfo: CodingInfo::default(),
             },
             data,
             edc: (),
