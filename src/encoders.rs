@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
+use std::ops::RangeInclusive;
 use std::simd::cmp::{SimdPartialEq, SimdPartialOrd};
-use std::simd::u8x8;
+use std::simd::{mask8x8, u8x8};
 
 use miette::{Diagnostic, IntoDiagnostic, LabeledSpan, SourceSpan, miette};
 use thiserror::Error;
@@ -277,6 +278,87 @@ pub fn str_to_ascii_buf<const N: usize>(str: &str) -> Result<[u8; N], StrToAscii
     Ok(buf)
 }
 
+pub trait CharBuf<'a, B: Buffer<'a>>: Sized {
+    const VALID_RANGES: &'static [RangeInclusive<u8>];
+    const VALID_CHARS: &'static [u8];
+    type ValidationErr: Diagnostic;
+
+    fn bytes(&self) -> &[u8];
+    fn len(&self) -> usize;
+
+    /// thanks clippy >:(
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn make_error(src: &[u8], offset: usize) -> Self::ValidationErr;
+
+    fn from_parts(bytes: B, len: usize) -> Self;
+
+    fn parse(bytes: B, len: usize) -> Result<Self, Self::ValidationErr> {
+        let len = len.min(bytes.as_bytes().len());
+        let bytes_slice = &bytes.as_bytes()[..len];
+        let (chunks, rem) = bytes_slice.as_bytes().as_chunks::<8>();
+        for chunk_bytes in chunks {
+            let chunk = u8x8::from_slice(chunk_bytes);
+            let in_valid_range = Self::VALID_RANGES
+                .iter()
+                .map(|valid| {
+                    let chunk = chunk - u8x8::splat(*valid.start());
+                    chunk.simd_le(u8x8::splat(valid.len() as u8))
+                })
+                .reduce(|a, b| a | b)
+                .unwrap_or_else(|| mask8x8::splat(false));
+
+            let in_valid_chars = Self::VALID_CHARS
+                .iter()
+                .map(|c| chunk.simd_eq(u8x8::splat(*c)))
+                .reduce(|a, b| a | b)
+                .unwrap_or_else(|| mask8x8::splat(false));
+
+            let valid = in_valid_range | in_valid_chars;
+            if !valid.all() {
+                let first_zero = valid.to_bitmask().trailing_ones();
+                return Err(Self::make_error(chunk_bytes, first_zero as usize));
+            }
+        }
+        for byte in rem {
+            let in_valid_range = Self::VALID_RANGES
+                .iter()
+                .map(|valid| valid.contains(byte))
+                .reduce(|a, b| a | b)
+                .unwrap_or(false);
+
+            let in_valid_chars = Self::VALID_CHARS
+                .iter()
+                .map(|c| c == byte)
+                .reduce(|a, b| a | b)
+                .unwrap_or(false);
+
+            let valid = in_valid_range | in_valid_chars;
+            if !valid {
+                return Err(Self::make_error(&[*byte], 0));
+            }
+        }
+
+        Ok(Self::from_parts(bytes, len))
+    }
+
+    fn encode_chars<W: DiscWrite + ?Sized>(
+        &self,
+        writer: &mut W,
+        ctx: &EncodeCtx,
+    ) -> Result<(), EncodeError> {
+        let bytes = &self.bytes()[..self.len()];
+        writer.write_all(bytes).into_diagnostic()?;
+        let remaining = self.bytes().len().saturating_sub(self.len());
+        // pad remaining dchar buffer with spaces
+        Fill::new(remaining, b" ").encode(writer, ctx)?;
+
+        Ok(())
+    }
+}
+
 /// # d-characters (Filenames)
 /// ```plaintext
 ///    "0..9", "A..Z", and "_"
@@ -317,65 +399,51 @@ pub struct DCharBuf<'a, B: Buffer<'a>> {
     _ty:   PhantomData<&'a [u8]>,
 }
 
-impl<'a, B: Buffer<'a> + std::fmt::Debug> Encode for DCharBuf<'a, B> {
+impl<'a, B: Buffer<'a>> CharBuf<'a, B> for DCharBuf<'a, B> {
+    const VALID_RANGES: &'static [RangeInclusive<u8>] = &[b'0'..=b'9', b'A'..=b'Z'];
+    const VALID_CHARS: &'static [u8] = b"_";
+
+    type ValidationErr = DCharError;
+
+    fn bytes(&self) -> &[u8] {
+        self.bytes.as_bytes()
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn make_error(src: &[u8], offset: usize) -> Self::ValidationErr {
+        DCharError {
+            src:        std::str::from_utf8(src)
+                .expect("not valid utf8")
+                .to_string(),
+            char_label: (offset, 1).into(),
+        }
+    }
+
+    fn from_parts(bytes: B, len: usize) -> Self {
+        Self {
+            bytes,
+            len,
+            _ty: PhantomData,
+        }
+    }
+}
+
+impl<'a, B: Buffer<'a>> Encode for DCharBuf<'a, B> {
     fn encode<W: DiscWrite + ?Sized>(
         &self,
         writer: &mut W,
         ctx: &EncodeCtx,
     ) -> Result<(), EncodeError> {
-        let bytes = &self.bytes.as_bytes()[..self.len];
-        writer.write_all(bytes).into_diagnostic()?;
-        let remaining = self.bytes.as_bytes().len().saturating_sub(self.len);
-        // pad remaining dchar buffer with spaces
-        Fill::new(remaining, b" ").encode(writer, ctx)?;
-
-        Ok(())
+        self.encode_chars(writer, ctx)
     }
 }
 
 impl<'a, B: Buffer<'a>> DCharBuf<'a, B> {
-    #[inline(never)]
     pub fn new(bytes: B, len: usize) -> Result<Self, DCharError> {
-        let len = len.min(bytes.as_bytes().len());
-        let Some(bytes_slice) = bytes.as_bytes().get(..len) else {
-            return Ok(Self {
-                bytes,
-                len,
-                _ty: PhantomData,
-            });
-        };
-        let (chunks, rem) = bytes_slice.as_bytes().as_chunks::<8>();
-        for chunk_bytes in chunks {
-            let chunk = u8x8::from_slice(chunk_bytes);
-
-            let digits = chunk - u8x8::splat(b'0');
-            let is_number = digits.simd_le(u8x8::splat(9));
-
-            let alpha = chunk - u8x8::splat(b'A');
-            let is_alpha = alpha.simd_le(u8x8::splat(25));
-
-            let is_underscore = chunk.simd_eq(u8x8::splat(b'_'));
-
-            let valid = is_number | is_alpha | is_underscore;
-            if !valid.all() {
-                let first_zero = valid.to_bitmask().trailing_ones();
-                return Err(DCharError {
-                    src:        std::str::from_utf8(chunk_bytes)
-                        .expect("not valid utf8")
-                        .to_string(),
-                    char_label: (first_zero as usize, 1).into(),
-                });
-            }
-        }
-        for byte in rem {
-            DChar::new(*byte)?;
-        }
-
-        Ok(Self {
-            bytes,
-            _ty: PhantomData,
-            len,
-        })
+        Self::parse(bytes, len)
     }
 }
 
