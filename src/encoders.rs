@@ -1,4 +1,7 @@
-use miette::{IntoDiagnostic, LabeledSpan, miette};
+use std::simd::cmp::{SimdPartialEq, SimdPartialOrd};
+use std::simd::{mask8x64, u8x8, u8x64};
+
+use miette::{Diagnostic, IntoDiagnostic, LabeledSpan, SourceOffset, SourceSpan, miette};
 use thiserror::Error;
 
 use crate::iso9660::{Bcd, DiscWrite, Mss};
@@ -271,4 +274,97 @@ pub fn str_to_ascii_buf<const N: usize>(str: &str) -> Result<[u8; N], StrToAscii
     let len = N.min(str.len());
     buf[..len].copy_from_slice(&str.as_bytes()[..len]);
     Ok(buf)
+}
+
+/// # d-characters (Filenames)
+/// ```plaintext
+///    "0..9", "A..Z", and "_"
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct DChar(u8);
+#[derive(Debug, Clone, Error, Diagnostic)]
+#[error("byte '{src}' is not a vaild dchar")]
+pub struct DCharError {
+    #[source_code]
+    src: String,
+
+    #[label("not a d-char")]
+    char_label: SourceSpan,
+}
+
+impl DChar {
+    pub fn new(byte: u8) -> Result<Self, DCharError> {
+        match byte {
+            b'0'..=b'9' => Ok(Self(byte)),
+            b'A'..=b'Z' => Ok(Self(byte)),
+            b'_' => Ok(Self(byte)),
+            _ => Err(DCharError {
+                src:        format!("{}", byte as char),
+                char_label: (0, 1).into(),
+            }),
+        }
+    }
+}
+
+pub struct DCharBuf<'a> {
+    bytes: &'a [u8],
+}
+
+impl<'a> DCharBuf<'a> {
+    #[inline(never)]
+    pub fn new(bytes: &'a [u8]) -> Result<Self, DCharError> {
+        let (chunks, rem) = bytes.as_chunks::<8>();
+        for chunk_bytes in chunks {
+            let chunk = u8x8::from_slice(chunk_bytes);
+
+            let digits = chunk - u8x8::splat(b'0');
+            let is_number = digits.simd_le(u8x8::splat(9));
+
+            let alpha = chunk - u8x8::splat(b'A');
+            let is_alpha = alpha.simd_le(u8x8::splat(25));
+
+            let is_underscore = chunk.simd_eq(u8x8::splat(b'_'));
+
+            let valid = is_number | is_alpha | is_underscore;
+            if !valid.all() {
+                let first_zero = valid.to_bitmask().trailing_ones();
+                return Err(DCharError {
+                    src:        std::str::from_utf8(chunk_bytes)
+                        .expect("not valid utf8")
+                        .to_string(),
+                    char_label: (first_zero as usize, 1).into(),
+                });
+            }
+        }
+        for byte in rem {
+            DChar::new(*byte)?;
+        }
+
+        Ok(Self { bytes })
+    }
+}
+
+#[test]
+#[should_panic]
+#[cfg(test)]
+fn invalid_dchar() {
+    miette::set_panic_hook();
+    DChar::new(b'a').into_diagnostic().unwrap();
+}
+
+#[test]
+#[cfg(test)]
+fn dchar_buffer() {
+    let buffer = "HELLOWORLD_1".as_bytes();
+    assert!(DCharBuf::new(buffer).is_ok());
+    let buffer = "HELLO_world_1".as_bytes();
+    assert!(DCharBuf::new(buffer).is_err())
+}
+
+#[test]
+#[cfg(test)]
+#[should_panic]
+fn dchar_buffer_error() {
+    let buffer = "HELLO_world_1".as_bytes();
+    DCharBuf::new(buffer).into_diagnostic().unwrap();
 }

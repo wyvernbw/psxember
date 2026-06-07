@@ -7,9 +7,11 @@ edition = "2024"
 arbitrary-int = "2.1.1"
 bitbybit = "2.0.0"
 derive_more = { version = "2.1.1", features = ["deref", "deref_mut", "display"] }
-miette = { git = "https://github.com/wyvernbw/miette", branch = "wyvernbw/backtrace-support", version = "7.6.0" }
+# miette = { git = "https://github.com/wyvernbw/miette", branch = "wyvernbw/backtrace-support", version = "7.6.0" }
+miette = { git = "https://github.com/wyvernbw/miette", branch = "wyvernbw/backtrace-support", version = "7.6.0", features = ["fancy"] }
+# miette = { version = "*" }
 thiserror = "2.0.18"
 
 [dev-dependencies]
 miette = { git = "https://github.com/wyvernbw/miette", branch = "wyvernbw/backtrace-support", version = "7.6.0", features = ["fancy"] }
-
+# miette = { version = "*", features = ["fancy"] }
