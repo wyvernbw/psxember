@@ -15,3 +15,10 @@ tracing = { version = "0.1.44", default-features = false }
 miette = { git = "https://github.com/wyvernbw/miette", branch = "wyvernbw/backtrace-support", version = "7.6.0", features = ["fancy", "backtrace"] }
 tracing = { version = "0.1.44", features = ["std"] }
 tracing-subscriber = "0.3.23"
+
+[profile.release]
+strip = true
+lto = true
+opt-level = "s"
+codegen-units = 1
+panic = "abort"
