@@ -2,6 +2,13 @@
 
 Utility for writing disk images for the PlayStation 1.
 
+## Project goals
+
+- small binary 
+- 0 config by default
+- pluggable (`no_std` core with a cli implementation)
+- meant to work side by side with `cargo-psx`
+
 ## Todo
 
 Based on the PSX CD-ROM format described in psx-spx:
@@ -33,6 +40,7 @@ motivation for adding it:
 - `miette` and `thiserror`: explicit error handling and formatting for the end user
 - `tracing`: logging, only for development, will be removed.
 - `derive_more`: convenience derives. this will be removed later.
+- (future) `no_std_io`: io facade for std and no_std environments. 
 
 
 Dev dependencies can be anything I need for testing.
