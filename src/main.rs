@@ -12,7 +12,7 @@ pub mod iso9660;
 pub type Result<T> = miette::Result<T>;
 
 fn main() {
-    println!("Hello, world!");
+    panic!("Hello, world!");
     // {
     //     use crate::encoders::DCharBuf;
     //     std::hint::black_box(DCharBuf::new(std::hint::black_box("TEST").as_bytes()).unwrap());
