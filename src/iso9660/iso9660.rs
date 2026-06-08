@@ -4,7 +4,6 @@ mod tests;
 pub mod vol_desc;
 
 use std::io::{Cursor, Seek, Write};
-use std::marker::Destruct;
 
 use arbitrary_int::prelude::*;
 use bitbybit::{bitfield, *};
@@ -103,7 +102,7 @@ impl<T> Mss<T> {
 pub const SECTOR_RAW_SIZE: usize = 0x930;
 
 impl CdromCursor {
-    pub fn from_mss<T: Into<u8> + Destruct>(mss: Mss<T>) -> Self {
+    pub fn from_mss<T: Into<u8>>(mss: Mss<T>) -> Self {
         let min = mss.min.into() as u32;
         let sec = mss.sec.into() as u32;
         let sect = mss.sect.into() as u32;
@@ -157,7 +156,7 @@ pub enum SectSize {
 type Todo = ();
 
 impl Encode for Todo {
-    fn encode<W: ?Sized + DiscWrite>(&self, writer: &mut W) -> Result<(), EncodeError> {
+    fn encode<W: ?Sized + DiscWrite>(&self, _: &mut W) -> Result<(), EncodeError> {
         // todo!()
         Ok(())
     }

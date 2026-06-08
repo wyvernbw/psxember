@@ -1,7 +1,7 @@
-use std::marker::PhantomData;
-use std::ops::RangeInclusive;
-use std::simd::cmp::{SimdPartialEq, SimdPartialOrd};
-use std::simd::{mask8x8, u8x8};
+use core::marker::PhantomData;
+use core::ops::RangeInclusive;
+use core::simd::cmp::{SimdPartialEq, SimdPartialOrd};
+use core::simd::{mask8x8, u8x8};
 
 use miette::{Diagnostic, IntoDiagnostic, LabeledSpan, SourceSpan, miette};
 use thiserror::Error;
