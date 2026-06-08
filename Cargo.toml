@@ -4,10 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["psxember-core"]
+members = ["psxember-cli","psxember-core"]
 
 [workspace.dependencies]
 psxember-core.path = "./psxember-core"
+miette = { git = "https://github.com/wyvernbw/miette", branch = "wyvernbw/backtrace-support", version = "7.6.0" }
+# miette.version = "*"
 
 [profile.release]
 strip = true

@@ -4,14 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+miette.workspace = true
+thiserror = "2.0.18"
 arbitrary-int = "2.1.1"
 bitbybit = "2.0.0"
 derive_more = { version = "2.1.1", features = ["deref", "deref_mut", "display"] }
-miette = { git = "https://github.com/wyvernbw/miette", branch = "wyvernbw/backtrace-support", version = "7.6.0" }
-thiserror = "2.0.18"
 tracing = { version = "0.1.44", default-features = false }
 
 [dev-dependencies]
-miette = { git = "https://github.com/wyvernbw/miette", branch = "wyvernbw/backtrace-support", version = "7.6.0", features = ["fancy", "backtrace"] }
+miette = { workspace = true, features = ["fancy", "backtrace"] }
 tracing = { version = "0.1.44", features = ["std"] }
 tracing-subscriber = "0.3.23"

@@ -1,0 +1,12 @@
+[package]
+name = "psxember-cli"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "psxember"
+path = "./src/main.rs"
+
+[dependencies]
+psxember-core.workspace = true
+miette = { workspace = true, features = ["fancy-no-backtrace"] }

@@ -4,7 +4,7 @@ Utility for writing disk images for the PlayStation 1.
 
 ## Project goals
 
-- small binary (currently 84K with nightly, see [build.sh](./build.sh))
+- small binary (currently ~100K or ~355K with nice error formatting, see [build.sh](./build.sh))
 - 0 config by default
 - pluggable (*eventually* `no_std` core with a cli implementation, see below)
 - meant to work side by side with `cargo-psx`
