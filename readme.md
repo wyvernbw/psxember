@@ -6,8 +6,12 @@ Utility for writing disk images for the PlayStation 1.
 
 - small binary (currently 84K with nightly, see [build.sh](./build.sh))
 - 0 config by default
-- pluggable (`no_std` core with a cli implementation)
+- pluggable (*eventually* `no_std` core with a cli implementation, see below)
 - meant to work side by side with `cargo-psx`
+
+blockers for `no_std` support:
+- `core::io` 
+- `miette`
 
 ## Todo
 
@@ -40,7 +44,5 @@ motivation for adding it:
 - `miette` and `thiserror`: explicit error handling and formatting for the end user
 - `tracing`: logging, only for development, will be removed.
 - `derive_more`: convenience derives. this will be removed later.
-- (future) `no_std_io`: io facade for std and no_std environments. 
-
 
 Dev dependencies can be anything I need for testing.
