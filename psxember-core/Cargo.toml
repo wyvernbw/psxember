@@ -10,6 +10,7 @@ arbitrary-int = "2.1.1"
 bitbybit = "2.0.0"
 derive_more = { version = "2.1.1", features = ["deref", "deref_mut", "display"] }
 tracing = { version = "0.1.44", default-features = false }
+arrayvec = { version = "0.7.6", default-features = false }
 
 [dev-dependencies]
 miette = { workspace = true, features = ["fancy", "backtrace"] }

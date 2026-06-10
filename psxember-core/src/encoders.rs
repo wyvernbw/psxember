@@ -2,7 +2,9 @@ use core::marker::PhantomData;
 use core::ops::RangeInclusive;
 use core::simd::cmp::{SimdPartialEq, SimdPartialOrd};
 use core::simd::{mask8x8, u8x8};
+use std::borrow::Cow;
 
+use arrayvec::ArrayVec;
 use miette::{Diagnostic, IntoDiagnostic, LabeledSpan, SourceSpan, miette};
 use thiserror::Error;
 
@@ -95,9 +97,9 @@ impl Encode for &mut [u8] {
     }
 }
 
-#[derive(derive_more::Deref, derive_more::DerefMut, Clone, Copy)]
+#[derive(derive_more::Deref, derive_more::DerefMut, Clone, Copy, Default)]
 pub struct BigEndian<T>(pub T);
-#[derive(derive_more::Deref, derive_more::DerefMut, Clone, Copy)]
+#[derive(derive_more::Deref, derive_more::DerefMut, Clone, Copy, Default)]
 pub struct LittleEndian<T>(pub T);
 
 macro_rules! impl_endian_wrappers {
@@ -390,6 +392,12 @@ pub struct DCharBuf<'a, B: Buffer<'a>> {
     _ty:   PhantomData<&'a [u8]>,
 }
 
+impl<'a, B: Buffer<'a>> AsRef<[u8]> for DCharBuf<'a, B> {
+    fn as_ref(&self) -> &[u8] {
+        self.bytes.as_bytes()
+    }
+}
+
 impl<'a, B: Buffer<'a>> CharBuf<'a, B> for DCharBuf<'a, B> {
     const VALID_RANGES: &'static [RangeInclusive<u8>] = &[b'0'..=b'9', b'A'..=b'Z'];
     const VALID_CHARS: &'static [u8] = b"_";
@@ -514,6 +522,18 @@ impl<'a> Buffer<'a> for &'a [u8] {
 }
 
 impl<const N: usize> Buffer<'static> for [u8; N] {
+    fn as_bytes(&self) -> &[u8] {
+        self
+    }
+}
+
+impl<'a> Buffer<'a> for Cow<'a, [u8]> {
+    fn as_bytes(&self) -> &[u8] {
+        self
+    }
+}
+
+impl<const N: usize> Buffer<'static> for ArrayVec<u8, N> {
     fn as_bytes(&self) -> &[u8] {
         self
     }

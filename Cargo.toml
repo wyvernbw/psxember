@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["psxember-cli","psxember-core"]
+members = ["psxember-cli","psxember-core", "psxember-std"]
 
 [workspace.dependencies]
 psxember-core.path = "./psxember-core"

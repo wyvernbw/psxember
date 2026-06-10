@@ -1,7 +1,10 @@
 use core::cell::RefCell;
 use std::io::{Cursor, Read};
 
+use arrayvec::{ArrayString, ArrayVec};
 use bitbybit::bitfield;
+use miette::Diagnostic;
+use thiserror::Error;
 
 use crate::encoders::{
     BigEndian, ByteConst, DCharBuf, Encode, EncodeError, FillConst, str_to_ascii_buf,
@@ -152,18 +155,25 @@ pub struct Filename {
     name: [u8; 14],
 }
 
-#[derive(Debug)]
+#[derive(Debug, Diagnostic, Error)]
 pub enum FilenameError {
-    FilenameTooLarge,
-    NotAscii,
+    #[error("filename is too large: {0}...")]
+    FilenameTooLarge(ArrayString<14>),
+    #[error("filename is not ascii: {0}")]
+    NotAscii(ArrayString<14>),
 }
 
 impl Filename {
     pub fn from_ascii_str(string: &str) -> Result<Self, FilenameError> {
         if string.len() > 14 {
-            return Err(FilenameError::FilenameTooLarge);
+            let astr = ArrayString::from(&string[..14]).expect("sliced incorrectly");
+            return Err(FilenameError::FilenameTooLarge(astr));
         }
-        let filename = str_to_ascii_buf(string).map_err(|_| FilenameError::NotAscii)?;
+        let filename = str_to_ascii_buf(string).map_err(|_| {
+            FilenameError::NotAscii({
+                ArrayString::from(&string[..14]).expect("sliced incorrectly")
+            })
+        })?;
         let filename = Filename {
             len:  string.len() as u8,
             name: filename,
@@ -217,7 +227,7 @@ pub struct SystemUse {
     len:            u8,
     owner_id_group: ByteConst<0x0>,
     owner_id_user:  ByteConst<0x0>,
-    file_attr:      FileAttributes,
+    file_attr:      BigEndian<FileAttributes>,
     signature:      Signature,
     file_number:    u8,
     zerofill:       FillConst<0x0, 5>,
@@ -448,5 +458,27 @@ pub struct PathTableEntry {
     ext_attr_record_len: u8,
     dir_lba:             u32,
     parent_id:           u16,
-    dir_name:            DCharBuf<'static, [u8; 16]>,
+    // this encodes only up to `len` bytes of the ArrayVec
+    dir_name:            DCharBuf<'static, ArrayVec<u8, 16>>,
+}
+
+impl Encode for PathTableEntry {
+    fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
+        let PathTableEntry {
+            name_len,
+            ext_attr_record_len,
+            dir_lba,
+            parent_id,
+            dir_name,
+        } = self;
+        name_len.encode(writer)?;
+        ext_attr_record_len.encode(writer)?;
+        dir_lba.encode(writer)?;
+        parent_id.encode(writer)?;
+        dir_name.encode(writer)?;
+        if !dir_name.as_ref().len().is_multiple_of(2) {
+            0u8.encode(writer)?;
+        }
+        Ok(())
+    }
 }
