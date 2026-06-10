@@ -466,7 +466,9 @@ impl<T: Encode> Encode for Form1Sector<T> {
     }
 }
 
-impl<T: Encode> Form1Sector<T> {
+impl<T> Form1Sector<T> {
+    pub const DATA_SIZE: usize = 0x800;
+
     #[must_use]
     pub fn new(data: T, mss: Mss<Bcd>, submode: Submode) -> Self {
         let subheader = Subheader {
@@ -491,6 +493,8 @@ impl<T: Encode> Form1Sector<T> {
     }
 }
 
+pub const FORM2_DATA_SIZE: usize = 0x924;
+
 impl<T> Form2Sector<T> {
     #[must_use]
     pub fn new(data: T, mss: Mss<Bcd>, submode: Submode) -> Self {
@@ -511,6 +515,7 @@ impl<T> Form2Sector<T> {
         }
     }
 }
+
 /// ```plaintext
 /// Mode2/Form2 (CD-XA)
 ///

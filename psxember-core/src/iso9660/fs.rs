@@ -1,8 +1,12 @@
-use std::io::Cursor;
+use core::cell::RefCell;
+use std::io::{Cursor, Read};
 
 use bitbybit::bitfield;
 
-use crate::encoders::{BigEndian, ByteConst, Encode, EncodeError, FillConst, str_to_ascii_buf};
+use crate::encoders::{
+    BigEndian, ByteConst, DCharBuf, Encode, EncodeError, FillConst, str_to_ascii_buf,
+};
+use crate::iso9660::{FORM2_DATA_SIZE, Form1Sector, Submode};
 
 use super::DiscWrite;
 
@@ -370,4 +374,79 @@ impl Encode for DirectoryRecord {
         system_use.encode(writer)?;
         Ok(())
     }
+}
+
+pub enum DiscFile<R> {
+    Data {
+        reader: RefCell<R>,
+        entry:  DirectoryRecord,
+    },
+    Audio(R),
+}
+
+pub(crate) enum ReadChunk<const N: usize> {
+    FullRead([u8; N]),
+    PartialRead { buffer: [u8; N], len: usize },
+}
+
+pub(crate) fn read_as_chunks<const N: usize>(
+    reader: &mut impl Read,
+) -> impl Iterator<Item = std::io::Result<ReadChunk<N>>> {
+    let mut done = false;
+    std::iter::from_fn(move || {
+        if done {
+            return None;
+        }
+        let mut buf = [0u8; N];
+        match reader.read(&mut buf) {
+            Ok(0) => None,
+            Ok(n) if n == N => Some(Ok(ReadChunk::FullRead(buf))),
+            Ok(n) => Some(Ok(ReadChunk::PartialRead {
+                buffer: buf,
+                len:    n,
+            })),
+            Err(err) => {
+                done = true;
+                Some(Err(err))
+            }
+        }
+    })
+}
+
+impl<R: Read> Encode for DiscFile<R> {
+    fn encode<W: DiscWrite + ?Sized>(&self, writer: &mut W) -> Result<(), EncodeError> {
+        match self {
+            DiscFile::Data { reader, .. } => {
+                for chunk in read_as_chunks::<FORM2_DATA_SIZE>(&mut *reader.borrow_mut()) {
+                    let chunk = chunk?;
+                    let chunk = match &chunk {
+                        ReadChunk::FullRead(buf) => buf,
+                        ReadChunk::PartialRead { buffer, len } => &buffer[..*len],
+                    };
+                    let form1 =
+                        Form1Sector::new(chunk, writer.address()?, Submode::new_with_raw_value(0));
+                    form1.encode(writer)?;
+                }
+                Ok(())
+            }
+            DiscFile::Audio(_) => todo!(),
+        }
+    }
+}
+
+/// # Path Table Entry
+/// ```plaintext
+///  00h 1       Length of Directory Name (LEN_DI) (01h..08h for PSX)
+///  01h 1       Extended Attribute Record Length  (usually 00h)
+///  02h 4       Directory Logical Block Number
+///  06h 2       Parent Directory Number           (0001h and up)
+///  08h LEN_DI  Directory Name (d-characters, d1-characters) (or 00h for Root)
+///  xxh 0..1    Padding Field (00h) (only if LEN_FI is odd)
+/// ```
+pub struct PathTableEntry {
+    name_len:            u8,
+    ext_attr_record_len: u8,
+    dir_lba:             u32,
+    parent_id:           u16,
+    dir_name:            DCharBuf<'static, [u8; 16]>,
 }
